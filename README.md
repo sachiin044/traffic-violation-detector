@@ -1,6 +1,40 @@
 # Traffic Violation Detection System
 
+![repo-languages](https://img.shields.io/github/languages/top/sachiin044/traffic-violation-detector?style=flat)
+![repo-stars](https://img.shields.io/github/stars/sachiin044/traffic-violation-detector?style=flat)
+![last-commit](https://img.shields.io/github/last-commit/sachiin044/traffic-violation-detector?style=flat)
+
 Automated Photo Identification and Classification for Traffic Violations using Computer Vision.
+
+This repository contains a production-oriented pipeline for detecting traffic violations from images (and video) with an emphasis on Indian traffic scenarios: motorcycles, autorickshaws, cars, and heavy vehicles. It combines custom object detectors, rule-based logic, OCR (PaddleOCR), and evidence packaging to produce actionable violation records.
+
+Key highlights
+
+- Modular detectors: vehicle detection, helmet, seatbelt, triple-riding, traffic signal, illegal parking, and license-plate readers.
+- Designed for Indian license plate formats and common traffic behaviors.
+- End-to-end evidence pipeline: detection → OCR → rule engine → annotated evidence and PDF challans.
+- Simple HTTP API (FastAPI) and a frontend dashboard (React + Vite / Streamlit) for inspection.
+
+Table of contents
+
+- Architecture
+- Violations Detected
+- Quick Start
+  - Backend
+  - Frontend
+- API Endpoints
+- Usage Examples
+  - Single Image
+  - Batch Processing
+  - Query Violations
+- Response Schema
+- Models
+- License Plate OCR Pipeline
+- Database
+- Limitations
+- Project Structure
+- Contributing
+- Acknowledgements & Contact
 
 ## Architecture
 
@@ -31,6 +65,8 @@ Vehicle Detector (Custom YOLO11n — Indian Driving Dataset)
         └── Illegal Parking Detector
 ```
 
+This pipeline is intended to be robust in real-world conditions—images are preprocessed for contrast and noise, high-resolution crops are used for OCR, and a rule engine correlates detections to infer violations.
+
 ## Violations Detected
 
 | Violation | Detection Method |
@@ -41,7 +77,17 @@ Vehicle Detector (Custom YOLO11n — Indian Driving Dataset)
 | Red Light Violation | red_light + vehicle overlapping stop_line |
 | Illegal Parking | illegal_parking class on full image |
 
-## Setup
+## Quick Start
+
+These instructions preserve the original setup commands while adding a few tips for a smoother local run.
+
+Prerequisites
+
+- Python 3.8+ (venv recommended)
+- Node.js 16+ / npm for the frontend
+- (Optional) GPU with CUDA + cuDNN to accelerate inference
+
+### Backend
 
 ```bash
 # 1. Backend Setup
@@ -57,14 +103,25 @@ pip install -r requirements.txt
 python app.py
 # or
 uvicorn app:app --host 0.0.0.0 --port 8000
+```
 
-# 2. Frontend Setup (in a new terminal)
+Tips:
+- If you have GPU drivers and CUDA, install the GPU-specific packages (torch/cuda wheel) before pip installing the full requirements. Use smaller batch sizes if VRAM is limited.
+- For reproducible environments consider using Docker (add Dockerfile to run both backend and frontend behind a reverse proxy).
+
+### Frontend (developer)
+
+Open a second terminal and run:
+
+```bash
 cd frontend
 npm install
 
 # Start the frontend dev server
 npm run dev
 ```
+
+The frontend communicates with the backend API; update the dev proxy or environment variables if your backend runs on a non-default host/port.
 
 ## API Endpoints
 
@@ -146,6 +203,9 @@ curl "http://localhost:8000/violations?violation_type=Helmet%20Non%20Compliance"
 | Traffic Signal | 85.6% | car, green_light, motobike, red_light, stop_line, yellow_light |
 | Helmet | 79.9% | Helmet, Motorbike, NoHelmet, PNumber |
 
+Notes:
+- mAP metrics are measured on internal validation sets. Use the `models` endpoint to confirm which weights are currently loaded in the running server.
+
 ## License Plate OCR Pipeline
 
 - **Detection**: YOLO license-plate model locates plate boxes on vehicle crops and the full frame.
@@ -210,3 +270,25 @@ MongoDB Atlas stores all detected violations with:
 │   └── ...                 # Other model weights
 └── inference_outputs/      # Annotated evidence images
 ```
+
+## Contributing
+
+Contributions are welcome — whether it's improving detection accuracy, adding new rules, or hardening the production deployment.
+
+Recommended workflow
+
+1. Fork the repo
+2. Create a branch: `git checkout -b feat/your-change`
+3. Run tests and format code
+4. Submit a PR with a clear description and screenshots of improvements (if applicable)
+
+Please open issues for feature requests or bugs so they can be triaged before large PRs.
+
+## Acknowledgements & Contact
+
+- Built with OpenCV, PyTorch, PaddleOCR, FastAPI, and Streamlit/React for the dashboard.
+- If you have questions or want to collaborate, open an issue or contact the maintainer: @sachiin044
+
+---
+
+(Original README content preserved in full above — architecture diagram, API, usage examples, response schema, models, OCR pipeline, limitations, and project structure.)
