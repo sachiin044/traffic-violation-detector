@@ -1,0 +1,8 @@
+{
+  "Helmet Non Compliance": 1000,
+  "Seatbelt Non Compliance": 1000,
+  "Triple Riding": 2000,
+  "Red Light Violation": 5000,
+  "Wrong Side Driving": 5000,
+  "Illegal Parking": 500
+}

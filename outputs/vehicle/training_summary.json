@@ -1,0 +1,14 @@
+{
+  "indian-driving-dataset": {
+    "model_name": "Vehicle Detector",
+    "status": "success",
+    "training_time": "2:35:58",
+    "precision": 0.8507,
+    "recall": 0.8041,
+    "map50": 0.8807,
+    "map50_95": 0.7191,
+    "best_model": "D:\\train\\outputs\\vehicle\\weights\\best.pt",
+    "onnx_model": "D:\\train\\outputs\\vehicle\\weights\\best.onnx",
+    "errors": null
+  }
+}

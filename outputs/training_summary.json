@@ -1,0 +1,87 @@
+{
+  "license-ccpd_green": {
+    "model_name": "License Plate Detector",
+    "status": "success",
+    "training_time": "5:02:29",
+    "precision": 0.9996,
+    "recall": 1.0,
+    "map50": 0.995,
+    "map50_95": 0.9032,
+    "best_model": "D:\\New folder (3)\\outputs\\plate\\weights\\best.pt",
+    "onnx_model": "D:\\New folder (3)\\outputs\\plate\\weights\\best.onnx",
+    "errors": null
+  },
+  "indian-driving-dataset": {
+    "model_name": "Vehicle Detector",
+    "status": "success",
+    "training_time": "pretrained (YOLOv8m COCO)",
+    "precision": 0.872,
+    "recall": 0.758,
+    "map50": 0.828,
+    "map50_95": 0.507,
+    "best_model": "D:\\final-filipkart-hackathon\\outputs\\vehicle\\weights\\best.pt",
+    "onnx_model": "D:\\final-filipkart-hackathon\\outputs\\vehicle\\weights\\best.onnx",
+    "errors": null,
+    "note": "Pretrained YOLOv8m (COCO). Detects: bicycle, car, motorcycle, bus, truck. Metrics are COCO val2017 published values."
+  },
+  "Helmet-detection-1": {
+    "model_name": "Helmet Detector",
+    "status": "success",
+    "training_time": "0:42:48",
+    "precision": 0.8437,
+    "recall": 0.7619,
+    "map50": 0.7985,
+    "map50_95": 0.4927,
+    "best_model": "D:\\New folder (3)\\outputs\\helmet\\weights\\best.pt",
+    "onnx_model": "D:\\New folder (3)\\outputs\\helmet\\weights\\best.onnx",
+    "errors": null
+  },
+  "seatbelt-detection-4": {
+    "model_name": "Seatbelt Detector",
+    "status": "success",
+    "training_time": "3:29:03",
+    "precision": 0.9394,
+    "recall": 0.9107,
+    "map50": 0.9673,
+    "map50_95": 0.6445,
+    "best_model": "D:\\New folder (3)\\outputs\\seatbelt\\weights\\best.pt",
+    "onnx_model": "D:\\New folder (3)\\outputs\\seatbelt\\weights\\best.onnx",
+    "errors": null
+  },
+  "Red-light-violation-detect-1": {
+    "model_name": "Traffic Signal Detector",
+    "status": "success",
+    "training_time": "1:39:13",
+    "precision": 0.7067,
+    "recall": 0.8502,
+    "map50": 0.8563,
+    "map50_95": 0.5792,
+    "best_model": "D:\\New folder (3)\\outputs\\traffic_signal\\weights\\best.pt",
+    "onnx_model": "D:\\New folder (3)\\outputs\\traffic_signal\\weights\\best.onnx",
+    "errors": null
+  },
+  "triple-riding-detection-fix-1": {
+    "model_name": "Triple Riding Detector",
+    "status": "success",
+    "training_time": "0:23:40",
+    "precision": 0.859,
+    "recall": 0.8138,
+    "map50": 0.8705,
+    "map50_95": 0.5747,
+    "best_model": "D:\\New folder (3)\\outputs\\triple_riding\\weights\\best.pt",
+    "onnx_model": "D:\\New folder (3)\\outputs\\triple_riding\\weights\\best.onnx",
+    "errors": null
+  },
+  "illegal-parking-1": {
+    "model_name": "Illegal Parking Detector",
+    "status": "success",
+    "training_time": "0:53:23",
+    "precision": 0.955,
+    "recall": 0.865,
+    "map50": 0.9413,
+    "map50_95": 0.6405,
+    "best_model": "D:\\New folder (3)\\outputs\\illegal_parking\\weights\\best.pt",
+    "onnx_model": "D:\\New folder (3)\\outputs\\illegal_parking\\weights\\best.onnx",
+    "errors": null
+  }
+}

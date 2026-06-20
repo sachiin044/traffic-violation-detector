@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+venv/
+.env
+.venv/
+env/
+ENV/
+
+# Database
+database/*.db
+database/*.sqlite3
+
+# Model Weights
+*.onnx
+models/
+yolo11n.pt
+outputs/**/weights/epoch*.pt
+outputs/**/weights/last.pt
+# Note: outputs/**/weights/best.pt files are kept as they are needed for inference (only ~5MB each)
+
+# Application Outputs & Uploads
+evidence/
+inference_outputs/
+runs/
+*.log
+
+# Frontend (Node.js)
+frontend/node_modules/
+frontend/dist/
+frontend/.eslintcache
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+
+# Temporary/Test images or videos in root
+/*.jpg
+/*.png
+/*.jpeg
+/*.mp4
+/*.avi
