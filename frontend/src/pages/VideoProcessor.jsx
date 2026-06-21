@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { processVideo, getVideoStatus, getVideoResult } from '../services/api';
+import { processVideo, getVideoStatus, getVideoResult, getAssetUrl } from '../services/api';
 import { Video, UploadCloud, AlertCircle, CheckCircle2, PlayCircle, ShieldAlert } from 'lucide-react';
 import ViolationBadge from '../components/ViolationBadge';
 
@@ -125,7 +125,7 @@ export default function VideoProcessor() {
                   <p className="text-slate-300 mb-6">Found <span className="text-danger font-bold text-lg">{result.violations}</span> violations in this video.</p>
                   
                   {result.processed_video ? (
-                    <a href={`http://localhost:8000${result.processed_video}`} target="_blank" rel="noreferrer" className="text-primary hover:text-blue-400 font-medium underline mb-6 inline-block">
+                    <a href={getAssetUrl(result.processed_video)} target="_blank" rel="noreferrer" className="text-primary hover:text-blue-400 font-medium underline mb-6 inline-block">
                       Watch Annotated Output Video
                     </a>
                   ) : (

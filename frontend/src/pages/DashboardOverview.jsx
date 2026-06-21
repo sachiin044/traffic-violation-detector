@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getDashboardSummary, searchEvidence } from '../services/api';
+import { getDashboardSummary, searchEvidence, getAssetUrl } from '../services/api';
 import StatCard from '../components/StatCard';
 import ViolationBadge from '../components/ViolationBadge';
 import { Activity, ShieldAlert, Users, CarFront, AlertOctagon, Zap } from 'lucide-react';
@@ -67,7 +67,7 @@ export default function DashboardOverview() {
               <div className="flex justify-between items-center">
                 <div className="flex space-x-4 items-center">
                   <img 
-                    src={`http://localhost:8000${record.thumbnail_path}`} 
+                    src={getAssetUrl(record.thumbnail_path)} 
                     className="w-16 h-12 object-cover rounded bg-dark-900 border border-dark-700"
                     alt="thumbnail"
                   />

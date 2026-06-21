@@ -13,7 +13,7 @@ import {
 import { processImage } from '../services/api';
 import ViolationBadge from '../components/ViolationBadge';
 
-const API_URL = 'http://localhost:8000';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 const getErrorMessage = (err) => (
   err?.response?.data?.detail
