@@ -34,7 +34,7 @@ Table of contents
 - Limitations
 - Project Structure
 - Contributing
-- Acknowledgements & Contact
+- Acknowledgements & Contact.
 
 ## Architecture
 
