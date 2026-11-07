@@ -1,100 +1,111 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
+import { Link } from 'react-router-dom';
 import { getEnforcementStats } from '../services/api';
-import { FileText, Clock, CheckCircle, IndianRupee, AlertTriangle, ShieldCheck } from 'lucide-react';
+import useRequest from '../lib/useRequest';
+import { AUTO_THRESHOLD, REVIEW_THRESHOLD } from '../lib/violations';
+import { formatNumber, inr, pct, plural } from '../lib/format';
+import { ErrorState, PageHead, SkeletonRows, StatusPill, ThresholdBar } from '../components/desk';
+
+// Challans move through these statuses in order; disputed sits outside the flow
+const FLOW = [
+  { status: 'REVIEW_REQUIRED', key: (s) => s.review_required + (s.pending || 0), text: 'Waiting for an officer to approve or reject' },
+  { status: 'GENERATED', key: (s) => s.generated, text: 'Approved, notice not sent yet' },
+  { status: 'ISSUED', key: (s) => s.issued, text: 'Notice sent to the vehicle owner' },
+  { status: 'PAID', key: (s) => s.paid, text: 'Fine received, case closed' },
+];
 
 export default function EnforcementCenter() {
-  const [stats, setStats] = useState(null);
-
-  useEffect(() => {
-    getEnforcementStats().then(setStats).catch(console.error);
-  }, []);
-
-  if (!stats) return <div className="p-8 text-slate-400">Loading enforcement data...</div>;
+  const { data: stats, error, loading, reload } = useRequest(getEnforcementStats, [], { interval: 15000 });
 
   return (
-    <div className="p-8 h-full flex flex-col overflow-y-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white mb-2">Enforcement Center</h1>
-        <p className="text-slate-400">Automated Challan Generation & Fine Management</p>
-      </div>
+    <div className="vd-page">
+      <PageHead
+        title="Enforcement"
+        lede="Where every challan is in the process, and the rules that decide when one is created."
+        actions={<Link className="vd-btn" to="/challans">Open challans</Link>}
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-        <div className="bg-dark-800 rounded-xl p-6 border border-dark-700 shadow-sm flex items-center">
-          <div className="p-4 rounded-full bg-primary/10 text-primary mr-4">
-            <FileText className="w-8 h-8" />
-          </div>
-          <div>
-            <p className="text-sm text-slate-400 font-medium">Total Challans</p>
-            <p className="text-3xl font-bold text-white">{stats.total_challans}</p>
+      {loading && !stats && <div className="vd-panel"><SkeletonRows rows={3} height={60} /></div>}
+      {!stats && error && (
+        <div className="vd-panel"><ErrorState error={error} onRetry={reload} title="Couldn’t load enforcement data" /></div>
+      )}
+
+      {stats && (
+        <div className="vd-stack">
+          <section className="vd-panel vd-panel--flush" aria-labelledby="flow-title">
+            <div className="vd-panel-head">
+              <h2 className="vd-panel-title" id="flow-title">Challan progress</h2>
+              <span className="vd-panel-note">
+                {formatNumber(stats.total_challans)} {plural(stats.total_challans, 'challan', 'challans')} in total
+              </span>
+            </div>
+            <div className="vd-pipeline" style={{ marginTop: 8, borderTop: '1px solid var(--vd-rule)' }}>
+              {FLOW.map((step) => (
+                <Link key={step.status} className="vd-stage-step" to={`/challans?status=${step.status}`}>
+                  <StatusPill status={step.status} />
+                  <b>{formatNumber(step.key(stats) || 0)}</b>
+                  <span className="vd-stage-step-note">{step.text}</span>
+                </Link>
+              ))}
+            </div>
+          </section>
+
+          <div className="vd-grid-2">
+            <section className="vd-panel" aria-labelledby="fines-title">
+              <div className="vd-panel-head">
+                <h2 className="vd-panel-title" id="fines-title">Fines</h2>
+              </div>
+              <div className="vd-amount">{inr(stats.estimated_fines)}</div>
+              <p className="vd-sub">Total of all challans except disputed ones.</p>
+              <dl className="vd-kv" style={{ marginTop: 16 }}>
+                <dt>Evidence records</dt>
+                <dd>{formatNumber(stats.total_violations)}</dd>
+                <dt>Challans created</dt>
+                <dd>{formatNumber(stats.total_challans)}</dd>
+                <dt>
+                  <Link to="/challans?status=DISPUTED" style={{ color: 'inherit', textDecoration: 'none' }}>
+                    <StatusPill status="DISPUTED" />
+                  </Link>
+                </dt>
+                <dd>{formatNumber(stats.disputed || 0)}</dd>
+              </dl>
+            </section>
+
+            <section className="vd-panel" aria-labelledby="rules-title">
+              <div className="vd-panel-head">
+                <h2 className="vd-panel-title" id="rules-title">When a challan is created</h2>
+              </div>
+              <div className="vd-rules">
+                <div className="vd-rule-row">
+                  <b>Plate required</b>
+                  <span>No challan is created when the number plate can’t be read. The evidence is still saved.</span>
+                </div>
+                <div className="vd-rule-row">
+                  <b>{pct(AUTO_THRESHOLD)} and above</b>
+                  <span>
+                    The challan and its PDF notice are generated automatically.
+                    <div style={{ marginTop: 10 }}><ThresholdBar confidence={0.92} label="Example: 92% confidence" /></div>
+                  </span>
+                </div>
+                <div className="vd-rule-row">
+                  <b>{pct(REVIEW_THRESHOLD)} to {pct(AUTO_THRESHOLD - 0.01)}</b>
+                  <span>
+                    The challan is created as Needs review and waits for an officer.
+                    <div style={{ marginTop: 10 }}><ThresholdBar confidence={0.77} label="Example: 77% confidence" /></div>
+                  </span>
+                </div>
+                <div className="vd-rule-row">
+                  <b>Below {pct(REVIEW_THRESHOLD)}</b>
+                  <span>
+                    Counted in analytics only. You can still create a challan by hand from the evidence record.
+                    <div style={{ marginTop: 10 }}><ThresholdBar confidence={0.55} label="Example: 55% confidence" /></div>
+                  </span>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
-
-        <div className="bg-dark-800 rounded-xl p-6 border border-dark-700 shadow-sm flex items-center">
-          <div className="p-4 rounded-full bg-warning/10 text-warning mr-4">
-            <Clock className="w-8 h-8" />
-          </div>
-          <div>
-            <p className="text-sm text-slate-400 font-medium">Review Queue (Pending)</p>
-            <p className="text-3xl font-bold text-white">{stats.review_required + stats.pending}</p>
-          </div>
-        </div>
-
-        <div className="bg-dark-800 rounded-xl p-6 border border-dark-700 shadow-sm flex items-center">
-          <div className="p-4 rounded-full bg-success/10 text-success mr-4">
-            <IndianRupee className="w-8 h-8" />
-          </div>
-          <div>
-            <p className="text-sm text-slate-400 font-medium">Est. Revenue</p>
-            <p className="text-3xl font-bold text-white">INR {stats.estimated_fines.toLocaleString()}</p>
-          </div>
-        </div>
-
-        <div className="bg-dark-800 rounded-xl p-6 border border-dark-700 shadow-sm flex items-center">
-          <div className="p-4 rounded-full bg-blue-500/10 text-blue-500 mr-4">
-            <ShieldCheck className="w-8 h-8" />
-          </div>
-          <div>
-            <p className="text-sm text-slate-400 font-medium">Issued / Generated</p>
-            <p className="text-3xl font-bold text-white">{stats.issued + stats.generated}</p>
-          </div>
-        </div>
-
-        <div className="bg-dark-800 rounded-xl p-6 border border-dark-700 shadow-sm flex items-center">
-          <div className="p-4 rounded-full bg-emerald-500/10 text-emerald-500 mr-4">
-            <CheckCircle className="w-8 h-8" />
-          </div>
-          <div>
-            <p className="text-sm text-slate-400 font-medium">Paid Challans</p>
-            <p className="text-3xl font-bold text-white">{stats.paid}</p>
-          </div>
-        </div>
-
-        <div className="bg-dark-800 rounded-xl p-6 border border-dark-700 shadow-sm flex items-center">
-          <div className="p-4 rounded-full bg-danger/10 text-danger mr-4">
-            <AlertTriangle className="w-8 h-8" />
-          </div>
-          <div>
-            <p className="text-sm text-slate-400 font-medium">Disputed</p>
-            <p className="text-3xl font-bold text-white">{stats.disputed}</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-primary/10 border border-primary/20 rounded-xl p-6 flex items-start">
-        <ShieldCheck className="w-6 h-6 text-primary mt-1 mr-4 flex-shrink-0" />
-        <div>
-          <h3 className="text-white font-bold mb-2">Automated Enforcement Workflow</h3>
-          <p className="text-slate-300 text-sm mb-2">
-            Entries appear here after an uploaded image or video creates evidence with a detected license plate and qualifying violation confidence.
-          </p>
-          <ul className="list-disc pl-5 text-sm text-slate-400 space-y-1">
-            <li><span className="text-primary font-medium">License plate required:</span> Challans are skipped when OCR cannot read a plate.</li>
-            <li><span className="text-success font-medium">Confidence &gt;= 0.85:</span> Automatically generates an official Challan PDF.</li>
-            <li><span className="text-warning font-medium">Confidence 0.70 - 0.84:</span> Flags evidence in the Review Queue.</li>
-            <li><span className="text-danger font-medium">Confidence &lt; 0.70:</span> Records violation for analytics but suppresses challan issuance.</li>
-          </ul>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

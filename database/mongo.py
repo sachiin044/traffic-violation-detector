@@ -274,6 +274,21 @@ class MongoDB:
         row = cursor.fetchone()
         return self._dict_factory(row) if row else None
 
+    def upsert_camera_config(self, camera_id: str, config: Dict[str, Any]) -> None:
+        """Insert or replace one camera's config (stored as JSON)."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            'INSERT INTO camera_configs (camera_id, config_json) VALUES (?, ?) '
+            'ON CONFLICT(camera_id) DO UPDATE SET config_json = excluded.config_json',
+            (camera_id, json.dumps(config)),
+        )
+        self.conn.commit()
+
+    def clear_camera_configs(self) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute('DELETE FROM camera_configs')
+        self.conn.commit()
+
     def create_video_task(self, task_id: str, filename: str) -> None:
         cursor = self.conn.cursor()
         cursor.execute('''

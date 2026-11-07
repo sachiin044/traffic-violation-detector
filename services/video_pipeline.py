@@ -45,11 +45,18 @@ class VideoInferencePipeline:
             # Fetch Camera Config
             config = thread_db.get_camera_config(camera_id)
             if not config:
-                logger.warning(f"No config for {camera_id}, using defaults")
-                allowed_vector = (0, 1)
+                # Without a camera config we don't know the legal direction or
+                # where the stop line is, so skip wrong-side and red-light checks
+                # instead of guessing (guessing flagged every vehicle moving up
+                # the frame as wrong-side). Run database/seed_cameras.py to add configs.
+                logger.warning(
+                    f"No camera config for {camera_id}: wrong-side and red-light "
+                    f"checks disabled for this video"
+                )
+                allowed_vector = None
                 stop_line = None
             else:
-                allowed_vector = config.get("allowed_vector", (0, 1))
+                allowed_vector = config.get("allowed_vector")
                 stop_line = config.get("stop_line_coords")
                 
             cap = cv2.VideoCapture(video_path)
@@ -88,7 +95,7 @@ class VideoInferencePipeline:
                 
                 # 2. Scene detections (Red light signal)
                 signal_detections = self.pipe.traffic_signal_detector.detect(frame)
-                is_red_light = any(d.class_name == "Red Light" and d.confidence > 0.5 for d in signal_detections)
+                is_red_light = any(d.class_name == "red_light" and d.confidence > 0.5 for d in signal_detections)
                 
                 vehicle_results = []
                 
@@ -111,7 +118,7 @@ class VideoInferencePipeline:
                     violations: List[Violation] = []
                     
                     # Temporal Evaluation: Wrong Side Driving
-                    if tid not in penalized_tracks:
+                    if allowed_vector is not None and tid not in penalized_tracks:
                         is_wrong_side = self.temporal_engine.evaluate_wrong_side(
                             track_id=tid, 
                             trajectory=track_history[tid], 
@@ -175,13 +182,14 @@ class VideoInferencePipeline:
                         )
                         
                         evidence_id = self.evidence_manager.generate_evidence_id()
-                        # Use annotate_image implicitly via creating package, wait, I need to annotate image
+                        evidence_ts = datetime.now(timezone.utc).isoformat()
                         from utils.annotate import annotate_image
-                        annotated = annotate_image(frame.copy(), [v_res], [], evidence_id, datetime.now(timezone.utc).isoformat())
+                        annotated = annotate_image(frame.copy(), [v_res], [], evidence_id, evidence_ts)
                         
                         report = self.evidence_manager.create_evidence_package(
                             original_image=frame, annotated_image=annotated,
-                            vehicle_results=[v_res], scene_violations=[], processing_time_ms=50
+                            vehicle_results=[v_res], scene_violations=[], processing_time_ms=50,
+                            evidence_id=evidence_id, timestamp=evidence_ts,
                         )
                         report["camera_id"] = camera_id
                         report["track_id"] = tid

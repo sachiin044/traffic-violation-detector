@@ -1,6 +1,8 @@
 """
-Seed script to populate mock camera configurations into MongoDB.
-Run this once to setup the `camera_configs` collection.
+Seed script to populate mock camera configurations into the SQLite DB.
+Run once from the project root:  python database/seed_cameras.py
+NOTE: the coordinates below are examples. Edit allowed_vector and
+stop_line_coords to match your real camera view before relying on them.
 """
 
 import sys
@@ -38,16 +40,13 @@ MOCK_CAMERAS = [
 ]
 
 def seed_cameras():
-    db = MongoDB()
+    db = MongoDB()  # SQLite-backed (name kept for compatibility)
     db.connect()
     
-    collection = db.db["camera_configs"]
-    
-    # Clear existing
-    collection.delete_many({})
-    
-    # Insert new
-    collection.insert_many(MOCK_CAMERAS)
+    # Clear existing, then insert each camera
+    db.clear_camera_configs()
+    for cam in MOCK_CAMERAS:
+        db.upsert_camera_config(cam["camera_id"], cam)
     logger.info(f"Successfully seeded {len(MOCK_CAMERAS)} camera configurations.")
     
     db.close()

@@ -47,22 +47,36 @@ class PlateReader:
     def load(self) -> None:
         """Load the OCR engine. Called once at startup."""
         if OCR_PRIMARY.lower() == "paddleocr" or OCR_FALLBACK.lower() == "paddleocr":
-            try:
-                from paddleocr import PaddleOCR
+            import importlib.util
+            import os
 
-                self._paddle_ocr = PaddleOCR(
-                    lang="en",
-                    device="cpu",
-                    enable_mkldnn=False,
-                    cpu_threads=4,
-                    use_doc_orientation_classify=False,
-                    use_doc_unwarping=False,
-                    use_textline_orientation=False,
+            if importlib.util.find_spec("paddle") is None:
+                # paddleocr is useless without the paddlepaddle runtime, and
+                # paddlepaddle has no wheels for Python 3.14+. Skip it (and
+                # PaddleX's slow model-host connectivity check) and use EasyOCR.
+                logger.warning(
+                    "[OCR] PaddlePaddle runtime not installed - PaddleOCR disabled, "
+                    "using EasyOCR only. To enable it, use Python 3.9-3.13 and "
+                    "`pip install paddlepaddle`."
                 )
-                self._paddle_available = True
-                logger.info("[OCR] PaddleOCR loaded successfully")
-            except Exception as e:
-                logger.error(f"[OCR] PaddleOCR failed to load: {e}")
+            else:
+                os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+                try:
+                    from paddleocr import PaddleOCR
+
+                    self._paddle_ocr = PaddleOCR(
+                        lang="en",
+                        device="cpu",
+                        enable_mkldnn=False,
+                        cpu_threads=4,
+                        use_doc_orientation_classify=False,
+                        use_doc_unwarping=False,
+                        use_textline_orientation=False,
+                    )
+                    self._paddle_available = True
+                    logger.info("[OCR] PaddleOCR loaded successfully")
+                except Exception as e:
+                    logger.error(f"[OCR] PaddleOCR failed to load: {e}")
 
         if OCR_PRIMARY.lower() == "easyocr" or OCR_FALLBACK.lower() == "easyocr":
             try:

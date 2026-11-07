@@ -1,202 +1,181 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { getChallanDetails, updateChallanStatus, getChallanPdfUrl } from '../services/api';
-import { ArrowLeft, FileText, Download, CheckCircle, AlertTriangle, Clock, Activity, FileBadge, IndianRupee } from 'lucide-react';
+import { Link, useParams } from 'react-router-dom';
+import { Download, FileText } from 'lucide-react';
+import { getChallanDetails, getChallanPdfUrl, updateChallanStatus } from '../services/api';
+import useRequest from '../lib/useRequest';
+import { challanStatus, vehicleName, violationName } from '../lib/violations';
+import { errorMessage, formatDateTime, inr } from '../lib/format';
+import { ErrorState, Finding, PageHead, Plate, SkeletonRows, StatusPill, ThresholdLegend } from '../components/desk';
+
+// What an officer can do next from each status
+const NEXT_STEPS = {
+  REVIEW_REQUIRED: [{ to: 'GENERATED', label: 'Approve challan', done: 'Approved. It is ready to issue.' }],
+  PENDING: [{ to: 'GENERATED', label: 'Approve challan', done: 'Approved. It is ready to issue.' }],
+  GENERATED: [{ to: 'ISSUED', label: 'Issue notice', done: 'Notice issued.' }],
+  ISSUED: [
+    { to: 'PAID', label: 'Mark as paid', done: 'Marked as paid.' },
+    { to: 'DISPUTED', label: 'Mark as disputed', secondary: true, done: 'Marked as disputed.' },
+  ],
+  DISPUTED: [{ to: 'PAID', label: 'Mark as paid', done: 'Marked as paid.' }],
+  PAID: [],
+};
+
+const STATUS_HELP = {
+  REVIEW_REQUIRED: 'Confidence was between 70% and 85%, so an officer has to check the evidence before this can be issued.',
+  PENDING: 'Waiting for an officer to check the evidence.',
+  GENERATED: 'Approved and ready. Issue the notice to send it to the vehicle owner.',
+  ISSUED: 'The notice has been issued. Mark it paid once the fine is received.',
+  PAID: 'The fine has been paid. Nothing else to do.',
+  DISPUTED: 'The owner has disputed this challan. Review the evidence before closing it.',
+};
+
+// Load the PDF as a blob so a missing file shows a clear message, not raw JSON
+function usePdf(id) {
+  const [pdf, setPdf] = useState({ state: 'loading' });
+  useEffect(() => {
+    let url;
+    let cancelled = false;
+    setPdf({ state: 'loading' });
+    fetch(getChallanPdfUrl(id))
+      .then((res) => (res.ok ? res.blob() : Promise.reject(new Error(String(res.status)))))
+      .then((blob) => {
+        if (cancelled) return;
+        url = URL.createObjectURL(blob);
+        setPdf({ state: 'ready', url });
+      })
+      .catch(() => { if (!cancelled) setPdf({ state: 'missing' }); });
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [id]);
+  return pdf;
+}
 
 export default function ChallanDetails() {
   const { id } = useParams();
-  const navigate = useNavigate();
-  const [challan, setChallan] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  
-  const fetchChallan = async () => {
+  const { data: challan, error, loading, reload } = useRequest(() => getChallanDetails(id), [id]);
+  const [override, setOverride] = useState(null); // status after an update, until the next reload
+  const [action, setAction] = useState({ state: 'idle' });
+  const pdf = usePdf(id);
+
+  const status = override || challan?.status;
+
+  const changeStatus = async (step) => {
+    setAction({ state: 'saving', to: step.to });
     try {
-      const data = await getChallanDetails(id);
-      setChallan(data);
+      await updateChallanStatus(id, step.to);
+      setOverride(step.to);
+      setAction({ state: 'done', message: step.done });
     } catch (err) {
-      setError("Failed to load challan. " + err.message);
-    } finally {
-      setLoading(false);
+      setAction({ state: 'error', message: errorMessage(err, 'The status could not be changed.') });
     }
   };
 
-  useEffect(() => {
-    fetchChallan();
-  }, [id]);
+  if (loading && !challan) {
+    return (
+      <div className="vd-page">
+        <PageHead title="Challan" back={{ to: '/challans', label: 'Challans' }} />
+        <div className="vd-panel"><SkeletonRows rows={6} /></div>
+      </div>
+    );
+  }
 
-  const handleStatusUpdate = async (newStatus) => {
-    try {
-      await updateChallanStatus(id, newStatus);
-      setChallan({ ...challan, status: newStatus });
-    } catch (err) {
-      alert("Failed to update status");
-    }
-  };
-
-  if (loading) return <div className="p-8 text-slate-400">Loading challan details...</div>;
-  if (error) return <div className="p-8 text-danger">{error}</div>;
-  if (!challan) return <div className="p-8 text-slate-400">Challan not found.</div>;
-
-  return (
-    <div className="p-8 h-full flex flex-col overflow-y-auto">
-      <div className="mb-6 flex items-center justify-between">
-        <div className="flex items-center">
-          <button 
-            onClick={() => navigate('/enforcement')}
-            className="mr-4 p-2 rounded-full hover:bg-dark-700 transition-colors text-slate-400"
-          >
-            <ArrowLeft className="w-6 h-6" />
-          </button>
-          <div>
-            <h1 className="text-3xl font-bold text-white flex items-center">
-              {challan.challan_id}
-              <span className="ml-4 px-3 py-1 bg-dark-800 border border-dark-600 rounded-full text-sm text-slate-300 font-mono">
-                Evidence: {challan.evidence_id}
-              </span>
-            </h1>
-          </div>
-        </div>
-        
-        <div className="flex space-x-3">
-          <a
-            href={getChallanPdfUrl(challan.challan_id)}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center px-4 py-2 bg-dark-800 hover:bg-dark-700 border border-dark-600 text-white rounded-lg transition-colors font-medium"
-          >
-            <Download className="w-4 h-4 mr-2" /> Download PDF
-          </a>
-          
-          {challan.status === 'REVIEW_REQUIRED' && (
-            <button 
-              onClick={() => handleStatusUpdate('GENERATED')}
-              className="flex items-center px-4 py-2 bg-success/20 hover:bg-success/30 text-success border border-success/50 rounded-lg font-bold transition-colors"
-            >
-              <CheckCircle className="w-4 h-4 mr-2" /> Approve Review
-            </button>
-          )}
-          
-          {challan.status === 'GENERATED' && (
-            <button 
-              onClick={() => handleStatusUpdate('ISSUED')}
-              className="flex items-center px-4 py-2 bg-primary/20 hover:bg-primary/30 text-primary border border-primary/50 rounded-lg font-bold transition-colors"
-            >
-              <FileBadge className="w-4 h-4 mr-2" /> Issue Notice
-            </button>
-          )}
-          
-          {challan.status === 'ISSUED' && (
-            <button 
-              onClick={() => handleStatusUpdate('PAID')}
-              className="flex items-center px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-500 border border-emerald-500/50 rounded-lg font-bold transition-colors"
-            >
-              <IndianRupee className="w-4 h-4 mr-2" /> Mark as Paid
-            </button>
-          )}
+  if (!challan) {
+    return (
+      <div className="vd-page">
+        <PageHead title="Challan" back={{ to: '/challans', label: 'Challans' }} />
+        <div className="vd-panel">
+          <ErrorState
+            error={error}
+            onRetry={error?.response?.status === 404 ? undefined : reload}
+            title={error?.response?.status === 404 ? `Challan ${id} doesn’t exist` : 'Couldn’t load this challan'}
+          />
         </div>
       </div>
+    );
+  }
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-        {/* Left Column: Metadata */}
-        <div className="space-y-8">
-          
-          {/* Status Card */}
-          <div className="bg-dark-800 rounded-xl p-6 border border-dark-700 shadow-sm">
-            <h2 className="text-lg font-bold text-white mb-4">Current Status</h2>
-            <div className="flex items-center mb-2">
-              {challan.status === 'REVIEW_REQUIRED' ? <Clock className="w-6 h-6 text-warning mr-3" /> :
-               challan.status === 'GENERATED' ? <Activity className="w-6 h-6 text-blue-400 mr-3" /> :
-               challan.status === 'ISSUED' ? <FileBadge className="w-6 h-6 text-primary mr-3" /> :
-               challan.status === 'PAID' ? <CheckCircle className="w-6 h-6 text-emerald-500 mr-3" /> :
-               <AlertTriangle className="w-6 h-6 text-danger mr-3" />}
-              <span className="text-xl font-bold text-white tracking-wide">{challan.status}</span>
-            </div>
-            {challan.status === 'REVIEW_REQUIRED' && (
-              <p className="text-sm text-slate-400 mt-2 border-l-2 border-warning pl-3">
-                AI Confidence is {(challan.confidence * 100).toFixed(1)}%, which is below the auto-issue threshold (85%). Human review is required.
+  const steps = NEXT_STEPS[status] || [];
+  const pdfUrl = getChallanPdfUrl(challan.challan_id);
+
+  return (
+    <div className="vd-page">
+      <PageHead
+        title={challan.challan_id}
+        back={{ to: '/challans', label: 'Challans' }}
+        badge={<StatusPill status={status} large />}
+        actions={
+          <>
+            <a className="vd-btn" href={pdfUrl} target="_blank" rel="noreferrer">
+              <Download aria-hidden="true" />
+              Download PDF
+            </a>
+            {steps.map((step) => (
+              <button
+                key={step.to}
+                type="button"
+                className={`vd-btn${step.secondary ? '' : ' vd-btn--primary'}`}
+                disabled={action.state === 'saving'}
+                onClick={() => changeStatus(step)}
+              >
+                {action.state === 'saving' && action.to === step.to ? 'Saving…' : step.label}
+              </button>
+            ))}
+          </>
+        }
+      />
+
+      <div className="vd-split">
+        <section className="vd-panel vd-panel--flush" aria-label="Challan notice">
+          {pdf.state === 'loading' && <SkeletonRows rows={1} height={520} />}
+          {pdf.state === 'ready' && <iframe className="vd-doc" src={pdf.url} title={`Challan notice ${challan.challan_id}`} />}
+          {pdf.state === 'missing' && (
+            <div className="vd-state">
+              <FileText aria-hidden="true" />
+              <h3>The PDF notice isn’t on the server</h3>
+              <p>
+                It should be in <code>inference_outputs/challans/{challan.challan_id}.pdf</code>. It may have been
+                deleted, or the backend is running from a different folder.
               </p>
-            )}
-          </div>
-          
-          {/* Offender Info */}
-          <div className="bg-dark-800 rounded-xl p-6 border border-dark-700 shadow-sm">
-            <h2 className="text-lg font-bold text-white mb-4 flex items-center">
-              <FileText className="w-5 h-5 mr-2 text-primary" /> Offender Details
-            </h2>
-            <div className="space-y-4">
-              <div>
-                <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">License Plate</p>
-                <p className="text-2xl font-bold text-white font-mono">{challan.plate_number}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Vehicle Type</p>
-                <p className="text-white">{challan.vehicle_type}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Violation Type</p>
-                <p className="text-white text-lg font-medium">{challan.violation_type}</p>
-              </div>
-              <div className="bg-danger/10 p-4 rounded-lg border border-danger/20 mt-4">
-                <p className="text-xs text-danger uppercase tracking-wider font-semibold mb-1">Fine Amount</p>
-                <p className="text-3xl font-bold text-danger flex items-center">
-                  <IndianRupee className="w-6 h-6 mr-1" /> {challan.fine_amount}
-                </p>
-              </div>
             </div>
-          </div>
-          
-          {/* Timeline Info */}
-          <div className="bg-dark-800 rounded-xl p-6 border border-dark-700 shadow-sm">
-            <h2 className="text-lg font-bold text-white mb-4">Timeline</h2>
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between border-b border-dark-700 pb-2">
-                <span className="text-slate-400">Violation Occurred</span>
-                <span className="text-white">{new Date(challan.timestamp).toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between pb-2">
-                <span className="text-slate-400">Challan Created</span>
-                <span className="text-white">{new Date(challan.created_at).toLocaleString()}</span>
-              </div>
-            </div>
-          </div>
-          
-        </div>
+          )}
+        </section>
 
-        {/* Right Column: PDF Preview / Evidence */}
-        <div className="lg:col-span-2 space-y-8 flex flex-col h-full">
-          <div className="bg-dark-800 rounded-xl p-6 border border-dark-700 shadow-sm flex-1 flex flex-col">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold text-white">Official Notice Document</h2>
-              <span className="px-3 py-1 bg-primary/10 text-primary rounded-full text-xs font-bold border border-primary/20">
-                PDF Ready
-              </span>
-            </div>
-            
-            <div className="flex-1 bg-dark-900 rounded-lg border border-dark-700 overflow-hidden min-h-[600px] flex items-center justify-center relative group">
-               <object 
-                 data={getChallanPdfUrl(challan.challan_id)} 
-                 type="application/pdf" 
-                 width="100%" 
-                 height="100%"
-                 className="absolute inset-0 z-0"
-               >
-                 <p className="text-slate-400 text-center">Your browser does not support embedded PDFs. <br/><br/> 
-                   <a href={getChallanPdfUrl(challan.challan_id)} className="text-primary underline">Download it here</a>
-                 </p>
-               </object>
-               
-               {/* Overlay fallback if object fails to load visually */}
-               <div className="z-10 bg-dark-900/80 p-6 rounded-xl backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center shadow-2xl border border-dark-700">
-                  <FileBadge className="w-8 h-8 text-primary mr-4" />
-                  <div>
-                    <h3 className="text-white font-bold">Challan PDF Rendered</h3>
-                    <p className="text-slate-400 text-sm">Generated by AI-Assisted System using ReportLab</p>
-                  </div>
-               </div>
-            </div>
+        <aside className="vd-record">
+          {action.state === 'done' && (
+            <div className="vd-callout" data-tone="ok" role="status" style={{ marginBottom: 18 }}>{action.message}</div>
+          )}
+          {action.state === 'error' && (
+            <div className="vd-callout" data-tone="error" role="alert" style={{ marginBottom: 18 }}>{action.message}</div>
+          )}
+
+          <div className="vd-amount">{inr(challan.fine_amount)}</div>
+          <p className="vd-sub">Fine for {violationName(challan.violation_type).toLowerCase()}.</p>
+
+          <hr className="vd-rule" />
+          <Plate plate={challan.plate_number} />
+          <p className="vd-plate-note">{vehicleName(challan.vehicle_type)}</p>
+
+          <div className="vd-findings">
+            <Finding name={violationName(challan.violation_type)} confidence={challan.confidence} />
           </div>
-        </div>
+          <ThresholdLegend />
+
+          <hr className="vd-rule" />
+          <p className="vd-sub" style={{ marginTop: 0 }}>
+            <strong style={{ color: 'var(--vd-ink)' }}>{challanStatus(status).label}.</strong> {STATUS_HELP[status]}
+          </p>
+
+          <dl className="vd-kv" style={{ marginTop: 14 }}>
+            <dt>Violation recorded</dt>
+            <dd>{formatDateTime(challan.timestamp)}</dd>
+            <dt>Challan created</dt>
+            <dd>{formatDateTime(challan.created_at)}</dd>
+            <dt>Evidence</dt>
+            <dd><Link className="vd-link" to={`/evidence/${challan.evidence_id}`}>{challan.evidence_id}</Link></dd>
+          </dl>
+        </aside>
       </div>
     </div>
   );

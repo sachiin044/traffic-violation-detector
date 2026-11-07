@@ -13,7 +13,7 @@ from reportlab.lib import colors
 from reportlab.lib.units import inch
 
 from database.mongo import MongoDB
-from config import INFERENCE_OUTPUTS_DIR
+from config import INFERENCE_OUTPUTS_DIR, EVIDENCE_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,23 @@ class ChallanManager:
         logger.info(f"Created Challan {challan_id} with status {status}")
         return challan_data
 
+    @staticmethod
+    def _resolve_evidence_file(web_path: Optional[str], evidence_id: Optional[str], default_name: str) -> Optional[Path]:
+        """Map a web path like /evidence/TVD-.../original.jpg to the file on disk."""
+        candidates = []
+        if web_path:
+            rel = str(web_path).replace("\\", "/").lstrip("/")
+            if rel.startswith("evidence/"):
+                candidates.append(EVIDENCE_DIR / rel[len("evidence/"):])
+            elif rel.startswith("outputs/"):
+                candidates.append(INFERENCE_OUTPUTS_DIR / rel[len("outputs/"):])
+        if evidence_id:
+            candidates.append(EVIDENCE_DIR / evidence_id / default_name)
+        for p in candidates:
+            if p.is_file():
+                return p
+        return None
+
     def generate_pdf(self, challan: Dict[str, Any], evidence: Dict[str, Any]) -> str:
         """Render the official PDF Notice."""
         challan_id = challan["challan_id"]
@@ -148,18 +165,22 @@ class ChallanManager:
         c.drawString(50, y, "Photographic Evidence:")
         y -= 10
         
-        orig_path = Path(evidence.get("original_path", "")).name
-        orig_full = INFERENCE_OUTPUTS_DIR / orig_path
-        annot_path = Path(evidence.get("annotated_path", "")).name
-        annot_full = INFERENCE_OUTPUTS_DIR / annot_path
+        evidence_id = evidence.get("evidence_id")
+        orig_full = self._resolve_evidence_file(
+            evidence.get("image_path") or evidence.get("original_image_path"),
+            evidence_id, "original.jpg",
+        )
+        annot_full = self._resolve_evidence_file(
+            evidence.get("annotated_path"), evidence_id, "annotated.jpg",
+        )
         
-        try:
-            if orig_full.exists():
-                c.drawImage(str(orig_full), 50, y - 200, width=220, height=180, preserveAspectRatio=True)
-            if annot_full.exists():
-                c.drawImage(str(annot_full), 300, y - 200, width=220, height=180, preserveAspectRatio=True)
-        except Exception as e:
-            logger.error(f"Failed to embed images in PDF: {e}")
+        for img_path, x in ((orig_full, 50), (annot_full, 300)):
+            if img_path is None:
+                continue
+            try:
+                c.drawImage(str(img_path), x, y - 200, width=220, height=180, preserveAspectRatio=True)
+            except Exception as e:
+                logger.error(f"Failed to embed {img_path} in PDF: {e}")
             
         y -= 250
         

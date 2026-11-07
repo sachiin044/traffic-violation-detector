@@ -1,126 +1,165 @@
-import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { Download, ImageOff } from 'lucide-react';
 import { getAssetUrl, getEvidenceDetails, getEvidenceDownloadUrl } from '../services/api';
-import ViolationBadge from '../components/ViolationBadge';
-import { ArrowLeft, Download, ShieldCheck, Clock, Hash, Car } from 'lucide-react';
+import useRequest from '../lib/useRequest';
+import { toFindings } from '../lib/findings';
+import { vehicleName } from '../lib/violations';
+import { countWord, formatDateTime, formatDuration, plural } from '../lib/format';
+import {
+  ErrorState,
+  Finding,
+  PageHead,
+  PlateBlock,
+  SkeletonRows,
+  ThresholdLegend,
+  VehicleRecord,
+  ViolationTags,
+} from '../components/desk';
+import ChallanAction from '../components/desk/ChallanAction';
+
+function EvidenceStage({ record }) {
+  const [view, setView] = useState('annotated');
+  const [failed, setFailed] = useState({});
+  const id = record.evidence_id;
+  const sources = {
+    annotated: getAssetUrl(record.annotated_path || `/evidence/${id}/annotated.jpg`),
+    original: getAssetUrl(record.image_path || record.original_image_path || `/evidence/${id}/original.jpg`),
+  };
+  const src = sources[view];
+
+  return (
+    <section className="vd-stage" aria-label="Evidence photo">
+      <div className="vd-stage-bar">
+        <div className="vd-seg" role="group" aria-label="Photo view">
+          <button type="button" aria-pressed={view === 'annotated'} onClick={() => setView('annotated')}>Annotated</button>
+          <button type="button" aria-pressed={view === 'original'} onClick={() => setView('original')}>Original</button>
+        </div>
+        {record.camera_id && <span>{record.camera_id}{record.location ? `, ${record.location}` : ''}</span>}
+      </div>
+      <div className="vd-stage-frame">
+        {failed[view] ? (
+          <div className="vd-state" style={{ color: 'var(--vd-stage-text)' }}>
+            <ImageOff aria-hidden="true" />
+            <h3 style={{ color: '#fff' }}>This image isn’t on the server</h3>
+            <p>Expected in <code>evidence/{id}/</code>. It may have been deleted.</p>
+          </div>
+        ) : (
+          <img
+            src={src}
+            alt={view === 'annotated' ? 'Evidence photo with violations marked' : 'Original evidence photo'}
+            onError={() => setFailed((f) => ({ ...f, [view]: true }))}
+          />
+        )}
+      </div>
+      <div className="vd-stage-meta">
+        <span>Recorded <b>{formatDateTime(record.timestamp)}</b></span>
+        {Number.isFinite(record.processing_time_ms) && (
+          <span>Analysed in <b>{formatDuration(record.processing_time_ms)}</b></span>
+        )}
+        {record.track_id != null && <span>Video track <b>#{record.track_id}</b></span>}
+      </div>
+    </section>
+  );
+}
 
 export default function EvidenceDetails() {
   const { id } = useParams();
-  const navigate = useNavigate();
-  const [record, setRecord] = useState(null);
+  const { data: record, error, loading, reload } = useRequest(() => getEvidenceDetails(id), [id]);
 
-  useEffect(() => {
-    getEvidenceDetails(id).then(setRecord).catch(console.error);
-  }, [id]);
+  if (loading && !record) {
+    return (
+      <div className="vd-page">
+        <PageHead title={id} back={{ to: '/evidence', label: 'Evidence' }} />
+        <div className="vd-split">
+          <div className="vd-panel"><SkeletonRows rows={1} height={420} /></div>
+          <div className="vd-panel"><SkeletonRows rows={5} height={24} /></div>
+        </div>
+      </div>
+    );
+  }
 
-  if (!record) return <div className="p-8 text-slate-400">Loading evidence {id}...</div>;
+  if (!record) {
+    return (
+      <div className="vd-page">
+        <PageHead title={id} back={{ to: '/evidence', label: 'Evidence' }} />
+        <div className="vd-panel">
+          <ErrorState
+            error={error}
+            onRetry={error?.response?.status === 404 ? undefined : reload}
+            title={error?.response?.status === 404 ? 'This evidence record doesn’t exist' : 'Couldn’t load this evidence'}
+          />
+        </div>
+      </div>
+    );
+  }
 
-  const annotatedSrc = getAssetUrl(record.annotated_path || `/evidence/${record.evidence_id}/annotated.jpg`);
-  const originalSrc = getAssetUrl(record.image_path || record.original_image_path || `/evidence/${record.evidence_id}/original.jpg`);
+  const vehicles = record.vehicles || [];
+  const flagged = vehicles.filter((v) => v.violations?.length);
+  const scene = record.scene_violations || [];
+  const hasDetail = vehicles.length > 0 || scene.length > 0;
+  const count = hasDetail
+    ? flagged.reduce((n, v) => n + v.violations.length, 0) + scene.length
+    : (record.violations || []).length;
+  const plate = flagged.find((v) => v.license_plate)?.license_plate || record.plate_number;
+  const where = flagged.length === 1
+    ? `one ${vehicleName(flagged[0].vehicle_type).toLowerCase()}`
+    : flagged.length > 1 ? `${countWord(flagged.length)} vehicles` : null;
 
   return (
-    <div className="p-8">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-8">
-        <div className="flex items-center gap-4">
-          <button onClick={() => navigate(-1)} className="p-2 bg-dark-800 hover:bg-dark-700 rounded-lg transition-colors">
-            <ArrowLeft className="w-5 h-5 text-white" />
-          </button>
-          <div>
-            <h1 className="text-2xl font-bold text-white font-mono">{record.evidence_id}</h1>
-            <p className="text-slate-400">Generated on {new Date(record.timestamp).toLocaleString()}</p>
+    <div className="vd-page">
+      <PageHead
+        title={record.evidence_id}
+        back={{ to: '/evidence', label: 'Evidence' }}
+        lede={`Recorded ${formatDateTime(record.timestamp)}.`}
+        actions={
+          <a className="vd-btn" href={getEvidenceDownloadUrl(record.evidence_id)}>
+            <Download aria-hidden="true" />
+            Download evidence (.zip)
+          </a>
+        }
+      />
+
+      <div className="vd-split">
+        <EvidenceStage record={record} />
+
+        <aside className="vd-record">
+          <div className="vd-verdict" data-tone={count ? 'violation' : 'neutral'}>
+            <span className="vd-verdict-n">{count}</span>
+            <span className="vd-verdict-text">
+              {plural(count, 'violation', 'violations')}
+              {where && <><br />on {where}</>}
+            </span>
           </div>
-        </div>
-        
-        <a 
-          href={getEvidenceDownloadUrl(record.evidence_id)}
-          className="flex items-center gap-2 bg-primary hover:bg-blue-600 text-white px-6 py-2.5 rounded-lg font-medium shadow-lg transition-colors"
-        >
-          <Download className="w-5 h-5" />
-          Download Package (ZIP)
-        </a>
-      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* Left Col: Metadata */}
-        <div className="space-y-6">
-          <div className="bg-dark-800 rounded-xl p-6 border border-dark-700 shadow-sm">
-            <h2 className="text-lg font-bold text-white mb-6 border-b border-dark-700 pb-2">Violation Details</h2>
-            
-            <div className="space-y-4">
-              <div className="flex items-start gap-4">
-                <Hash className="w-5 h-5 text-slate-400 mt-0.5" />
-                <div>
-                  <p className="text-sm text-slate-400 mb-1">License Plate (OCR)</p>
-                  <p className="text-xl font-bold text-white">{record.plate_number || 'N/A'}</p>
-                  {record.ocr_confidence && <p className="text-xs text-success mt-1">{(record.ocr_confidence * 100).toFixed(1)}% OCR Confidence</p>}
-                </div>
-              </div>
-
-              <div className="flex items-start gap-4">
-                <Car className="w-5 h-5 text-slate-400 mt-0.5" />
-                <div>
-                  <p className="text-sm text-slate-400 mb-1">Vehicle Type</p>
-                  <p className="text-white capitalize font-medium">{record.vehicle_type}</p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-4">
-                <ShieldCheck className="w-5 h-5 text-slate-400 mt-0.5" />
-                <div>
-                  <p className="text-sm text-slate-400 mb-2">Detected Violations</p>
-                  <div className="flex flex-col gap-2 items-start">
-                    {record.violations.map(v => <ViolationBadge key={v} type={v} />)}
+          {hasDetail ? (
+            <>
+              {flagged.length > 0 && <hr className="vd-rule" />}
+              {flagged.map((v) => <VehicleRecord key={v.vehicle_id ?? v.track_id} vehicle={v} />)}
+              {scene.length > 0 && (
+                <>
+                  <hr className="vd-rule" />
+                  <p className="vd-section-label">Whole scene</p>
+                  <div className="vd-findings" style={{ marginTop: 0 }}>
+                    {toFindings(scene).map((f) => <Finding key={f.key} {...f} />)}
                   </div>
-                  <p className="text-xs text-success mt-2">Max Confidence: {(record.confidence * 100).toFixed(1)}%</p>
-                </div>
-              </div>
+                </>
+              )}
+              {count > 0 && <ThresholdLegend />}
+            </>
+          ) : (
+            <>
+              <hr className="vd-rule" />
+              <PlateBlock plate={record.plate_number} confidence={record.ocr_confidence} />
+              <div style={{ marginTop: 16 }}><ViolationTags types={record.violations} /></div>
+              <p className="vd-legend">Per-vehicle detail isn’t available for this record, only the summary.</p>
+            </>
+          )}
 
-              <div className="flex items-start gap-4">
-                <Clock className="w-5 h-5 text-slate-400 mt-0.5" />
-                <div>
-                  <p className="text-sm text-slate-400 mb-1">Processing Time</p>
-                  <p className="text-white font-medium">{record.processing_time_ms} ms</p>
-                </div>
-              </div>
-            </div>
+          <div className="vd-actions">
+            <ChallanAction evidenceId={record.evidence_id} plate={plate} />
           </div>
-        </div>
-
-        {/* Right Col: Images */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-dark-800 rounded-xl overflow-hidden border border-dark-700 shadow-sm relative group">
-            <div className="absolute top-4 left-4 bg-black/70 backdrop-blur px-3 py-1.5 rounded-lg text-white text-sm font-medium border border-white/10 shadow-lg">
-              Annotated Evidence
-            </div>
-            {annotatedSrc ? (
-              <img
-                src={annotatedSrc}
-                alt="Annotated Evidence"
-                className="w-full h-auto object-contain bg-black"
-              />
-            ) : (
-              <div className="min-h-64 flex items-center justify-center text-slate-400 bg-black">Annotated image unavailable</div>
-            )}
-          </div>
-          
-          <div className="bg-dark-800 rounded-xl overflow-hidden border border-dark-700 shadow-sm relative">
-            <div className="absolute top-4 left-4 bg-black/70 backdrop-blur px-3 py-1.5 rounded-lg text-white text-sm font-medium border border-white/10 shadow-lg">
-              Original Capture
-            </div>
-            {originalSrc ? (
-              <img
-                src={originalSrc}
-                alt="Original Capture"
-                className="w-full h-auto object-contain bg-black opacity-80"
-              />
-            ) : (
-              <div className="min-h-64 flex items-center justify-center text-slate-400 bg-black">Original image unavailable</div>
-            )}
-          </div>
-        </div>
-
+        </aside>
       </div>
     </div>
   );

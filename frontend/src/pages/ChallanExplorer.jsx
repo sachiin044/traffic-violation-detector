@@ -1,158 +1,163 @@
-import React, { useState, useEffect } from 'react';
-import { getChallans, updateChallanStatus, manualGenerateChallan } from '../services/api';
-import { useNavigate } from 'react-router-dom';
-import { FileText, Search, Filter, ShieldAlert, IndianRupee, ArrowRight, CheckCircle, Clock } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Search } from 'lucide-react';
+import { getChallans } from '../services/api';
+import useRequest from '../lib/useRequest';
+import useDebounced from '../lib/useDebounced';
+import { CHALLAN_STATUSES, vehicleName } from '../lib/violations';
+import { formatNumber, formatTime, inr, pctExact } from '../lib/format';
+import { EmptyState, ErrorState, PageHead, Plate, SkeletonRows, StatusPill, ViolationTags } from '../components/desk';
+
+const PAGE_SIZE = 20;
 
 export default function ChallanExplorer() {
-  const [challans, setChallans] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState('');
-  const [plateFilter, setPlateFilter] = useState('');
-  
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const status = params.get('status') || '';
+  const page = Math.max(0, Number(params.get('page') || 0));
+  const [plateInput, setPlateInput] = useState(params.get('plate') || '');
+  const plate = useDebounced(plateInput.trim().toUpperCase().replace(/\s+/g, ''));
 
-  const fetchChallans = async () => {
-    setLoading(true);
-    try {
-      const data = await getChallans({ 
-        limit: 50, 
-        status: statusFilter || undefined,
-        plate_number: plateFilter || undefined
-      });
-      setChallans(data.records);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+  const setParam = (key, value) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value); else next.delete(key);
+    if (key !== 'page') next.delete('page');
+    setParams(next, { replace: true });
   };
 
+  // Keep the plate filter in the URL once typing settles
   useEffect(() => {
-    fetchChallans();
-  }, [statusFilter]);
+    if ((params.get('plate') || '') !== plate) setParam('plate', plate);
+  }, [plate]);
 
-  const handleSearch = (e) => {
-    e.preventDefault();
-    fetchChallans();
-  };
+  const { data, error, loading, reload } = useRequest(
+    () => getChallans({
+      limit: PAGE_SIZE,
+      skip: page * PAGE_SIZE,
+      status: status || undefined,
+      plate_number: plate || undefined,
+    }),
+    [status, plate, page],
+  );
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'GENERATED': return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
-      case 'REVIEW_REQUIRED': return 'bg-warning/20 text-warning border-warning/30';
-      case 'ISSUED': return 'bg-primary/20 text-primary border-primary/30';
-      case 'PAID': return 'bg-success/20 text-success border-success/30';
-      case 'DISPUTED': return 'bg-danger/20 text-danger border-danger/30';
-      default: return 'bg-slate-700/50 text-slate-400 border-slate-600';
-    }
-  };
+  const records = data?.records || [];
+  const total = data?.total || 0;
+  const filtered = Boolean(status || plate);
+  const from = total ? page * PAGE_SIZE + 1 : 0;
+  const to = Math.min((page + 1) * PAGE_SIZE, total);
+
+  const open = (id) => navigate(`/challan/${id}`);
 
   return (
-    <div className="p-8 h-full flex flex-col">
-      <div className="mb-6 flex justify-between items-end">
-        <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Challan Explorer</h1>
-          <p className="text-slate-400">Search and manage traffic violation notices.</p>
-        </div>
-      </div>
+    <div className="vd-page">
+      <PageHead title="Challans" lede="Every notice created from evidence. Open one to review, issue or close it." />
 
-      <div className="bg-dark-800 rounded-xl border border-dark-700 shadow-sm flex-1 flex flex-col overflow-hidden">
-        
-        {/* Filters */}
-        <div className="p-4 border-b border-dark-700 flex flex-wrap gap-4 items-center justify-between">
-          <form onSubmit={handleSearch} className="flex flex-1 max-w-md">
-            <div className="relative w-full">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+      <section className="vd-panel vd-panel--flush">
+        <div className="vd-toolbar" role="search">
+          <label className="vd-field">
+            Plate number
+            <span className="vd-search">
+              <Search aria-hidden="true" />
               <input
-                type="text"
-                placeholder="Search plate number..."
-                value={plateFilter}
-                onChange={(e) => setPlateFilter(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 bg-dark-900 border border-dark-600 rounded-lg text-white focus:outline-none focus:border-primary transition-colors"
+                className="vd-input"
+                type="search"
+                placeholder="e.g. OD02AK5678"
+                value={plateInput}
+                onChange={(e) => setPlateInput(e.target.value)}
               />
-            </div>
-            <button type="submit" className="ml-2 bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors font-medium">
-              Search
-            </button>
-          </form>
-
-          <div className="flex items-center space-x-2">
-            <Filter className="w-5 h-5 text-slate-500" />
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="bg-dark-900 border border-dark-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-primary transition-colors"
-            >
-              <option value="">All Statuses</option>
-              <option value="REVIEW_REQUIRED">Review Required</option>
-              <option value="GENERATED">Generated</option>
-              <option value="ISSUED">Issued</option>
-              <option value="PAID">Paid</option>
-              <option value="DISPUTED">Disputed</option>
+            </span>
+          </label>
+          <label className="vd-field">
+            Status
+            <select className="vd-select" value={status} onChange={(e) => setParam('status', e.target.value)}>
+              <option value="">All statuses</option>
+              {CHALLAN_STATUSES.filter((s) => s.value !== 'PENDING').map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
             </select>
-          </div>
+          </label>
+          {filtered && (
+            <button
+              type="button"
+              className="vd-toggle-link"
+              style={{ paddingBottom: 11 }}
+              onClick={() => { setPlateInput(''); setParams({}, { replace: true }); }}
+            >
+              Clear filters
+            </button>
+          )}
+          <span className="vd-toolbar-end">
+            {data && `${formatNumber(total)} ${total === 1 ? 'challan' : 'challans'}`}
+          </span>
         </div>
 
-        {/* Table */}
-        <div className="flex-1 overflow-auto">
-          {loading ? (
-            <div className="flex justify-center items-center h-full text-slate-500">Loading challans...</div>
-          ) : challans.length === 0 ? (
-            <div className="flex justify-center items-center h-full text-slate-500 flex-col">
-              <ShieldAlert className="w-12 h-12 mb-4 opacity-50" />
-              <p>No challans found matching your criteria.</p>
-            </div>
+        {loading && !data && <SkeletonRows rows={6} />}
+        {error && !data && <ErrorState error={error} onRetry={reload} title="Couldn’t load challans" />}
+
+        {data && records.length === 0 && (
+          filtered ? (
+            <EmptyState title="No challans match these filters">Try another plate number or status.</EmptyState>
           ) : (
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-dark-900/50 sticky top-0 z-10">
+            <EmptyState title="No challans yet">
+              A challan is created when evidence has a readable plate and a violation at 70% confidence or more.
+            </EmptyState>
+          )
+        )}
+
+        {records.length > 0 && (
+          <div className="vd-table-wrap" style={{ opacity: loading ? 0.6 : 1 }}>
+            <table className="vd-table">
+              <thead>
                 <tr>
-                  <th className="p-4 text-slate-400 font-medium border-b border-dark-700">Challan ID</th>
-                  <th className="p-4 text-slate-400 font-medium border-b border-dark-700">Plate Number</th>
-                  <th className="p-4 text-slate-400 font-medium border-b border-dark-700">Violation</th>
-                  <th className="p-4 text-slate-400 font-medium border-b border-dark-700">Fine</th>
-                  <th className="p-4 text-slate-400 font-medium border-b border-dark-700">Confidence</th>
-                  <th className="p-4 text-slate-400 font-medium border-b border-dark-700">Status</th>
-                  <th className="p-4 text-slate-400 font-medium border-b border-dark-700">Action</th>
+                  <th>Challan</th>
+                  <th>Plate</th>
+                  <th>Violation</th>
+                  <th>Vehicle</th>
+                  <th className="is-num">Confidence</th>
+                  <th className="is-num">Fine</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
-                {challans.map((challan) => (
-                  <tr key={challan.challan_id} className="border-b border-dark-700 hover:bg-dark-700/30 transition-colors">
-                    <td className="p-4">
-                      <div className="flex items-center text-primary font-mono text-sm">
-                        <FileText className="w-4 h-4 mr-2" />
-                        {challan.challan_id}
-                      </div>
-                      <div className="text-xs text-slate-500 mt-1">{new Date(challan.timestamp).toLocaleString()}</div>
+                {records.map((c) => (
+                  <tr
+                    key={c.challan_id}
+                    className="vd-row-link"
+                    tabIndex={0}
+                    onClick={() => open(c.challan_id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') open(c.challan_id); }}
+                  >
+                    <td>
+                      <div className="is-id">{c.challan_id}</div>
+                      <div className="is-muted">{formatTime(c.created_at || c.timestamp)}</div>
                     </td>
-                    <td className="p-4 font-bold text-white tracking-wider">{challan.plate_number}</td>
-                    <td className="p-4 text-slate-300">{challan.violation_type}</td>
-                    <td className="p-4 text-warning font-bold">₹{challan.fine_amount}</td>
-                    <td className="p-4">
-                      <span className={`px-2 py-1 rounded text-xs font-bold ${challan.confidence >= 0.85 ? 'bg-success/20 text-success' : 'bg-warning/20 text-warning'}`}>
-                        {(challan.confidence * 100).toFixed(1)}%
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(challan.status)}`}>
-                        {challan.status}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <button
-                        onClick={() => navigate(`/challan/${challan.challan_id}`)}
-                        className="text-slate-400 hover:text-primary transition-colors p-2 hover:bg-primary/10 rounded-lg flex items-center"
-                      >
-                        Details <ArrowRight className="w-4 h-4 ml-1" />
-                      </button>
-                    </td>
+                    <td><Plate plate={c.plate_number} size="sm" /></td>
+                    <td><ViolationTags types={[c.violation_type]} /></td>
+                    <td>{vehicleName(c.vehicle_type)}</td>
+                    <td className="is-num">{pctExact(c.confidence)}</td>
+                    <td className="is-num">{inr(c.fine_amount)}</td>
+                    <td><StatusPill status={c.status} /></td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-        </div>
-      </div>
+          </div>
+        )}
+
+        {total > PAGE_SIZE && (
+          <div className="vd-pager">
+            <span>Showing {from} to {to} of {formatNumber(total)}</span>
+            <span className="vd-head-actions">
+              <button type="button" className="vd-btn" disabled={page === 0} onClick={() => setParam('page', String(page - 1))}>
+                Previous
+              </button>
+              <button type="button" className="vd-btn" disabled={to >= total} onClick={() => setParam('page', String(page + 1))}>
+                Next
+              </button>
+            </span>
+          </div>
+        )}
+      </section>
     </div>
   );
 }

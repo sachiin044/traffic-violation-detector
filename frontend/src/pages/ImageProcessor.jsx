@@ -1,352 +1,429 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  AlertCircle,
+  Bike,
   Camera,
-  CheckCircle2,
-  Clock3,
-  FileText,
-  Gauge,
-  Image as ImageIcon,
-  ShieldAlert,
-  UploadCloud,
+  Car,
+  ImageUp,
+  ParkingCircle,
+  ScanLine,
+  TrafficCone,
+  Users,
 } from 'lucide-react';
-import { processImage } from '../services/api';
-import ViolationBadge from '../components/ViolationBadge';
+import {
+  getAssetUrl,
+  getChallans,
+  getEvidenceDownloadUrl,
+  manualGenerateChallan,
+  processImage,
+} from '../services/api';
+import { Finding, ThresholdLegend, VehicleRecord } from '../components/desk';
+import { toFindings } from '../lib/findings';
+import {
+  countWord,
+  errorMessage,
+  formatBytes,
+  formatDuration,
+  formatTime,
+  plural,
+} from '../lib/format';
+import { vehicleName } from '../lib/violations';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const MAX_UPLOAD_MB = 20;
+const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
-const getErrorMessage = (err) => (
-  err?.response?.data?.detail
-  || err?.message
-  || 'Unable to analyze the image. Please try again.'
-);
+const CHECKS = [
+  { icon: Bike, name: 'Helmets', text: 'Every rider on a two-wheeler, including pillion riders.' },
+  { icon: Users, name: 'Triple riding', text: 'More than two people on one bike or scooter.' },
+  { icon: Car, name: 'Seatbelts', text: 'Drivers of cars, buses and trucks.' },
+  { icon: TrafficCone, name: 'Red light', text: 'Vehicles over the stop line while the signal is red.' },
+  { icon: ParkingCircle, name: 'Illegal parking', text: 'Checked across the whole scene.' },
+  { icon: ScanLine, name: 'Number plate', text: 'Read for each vehicle. A challan needs a readable plate.' },
+];
 
-const assetUrl = (path) => {
-  if (!path) return null;
-  if (path.startsWith('http')) return path;
-  return `${API_URL}${path}`;
-};
+const getErrorMessage = (err) => errorMessage(err, 'The photo could not be checked.');
 
-const formatMs = (ms) => {
-  if (!Number.isFinite(ms)) return 'N/A';
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
-};
-
-const formatConfidence = (value) => (
-  Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : 'N/A'
-);
-
-const normalizeResult = (data) => {
-  const vehicles = data?.vehicles || data?.violations || [];
-  const annotatedImage = data?.annotated_image_path
-    || data?.annotated_image
-    || (data?.evidence_id ? `/evidence/${data.evidence_id}/annotated.jpg` : null);
-
-  return {
-    ...data,
-    vehicles,
-    vehicleCount: data?.total_vehicles ?? data?.vehicles_detected ?? vehicles.length,
-    violationCount: data?.total_violations ?? vehicles.reduce((count, vehicle) => count + (vehicle.violations?.length || 0), 0),
-    annotatedImage,
-    sceneViolations: data?.scene_violations || [],
-  };
-};
-
-function MetricTile({ icon: Icon, label, value, tone = 'primary' }) {
-  const toneClass = {
-    primary: 'text-primary bg-primary/10 border-primary/20',
-    danger: 'text-danger bg-danger/10 border-danger/20',
-    success: 'text-success bg-success/10 border-success/20',
-    warning: 'text-warning bg-warning/10 border-warning/20',
-  }[tone];
-
-  return (
-    <div className="bg-dark-900 border border-dark-700 rounded-lg p-4">
-      <div className={`w-9 h-9 rounded-lg border flex items-center justify-center mb-3 ${toneClass}`}>
-        <Icon className="w-5 h-5" />
-      </div>
-      <p className="text-2xl font-bold text-white leading-none">{value}</p>
-      <p className="text-xs uppercase tracking-wider text-slate-400 mt-2">{label}</p>
-    </div>
-  );
-}
-
-function ImageReviewFrame({ title, src, alt, onError }) {
-  return (
-    <div className="bg-dark-900 border border-dark-700 rounded-lg overflow-hidden">
-      <div className="px-4 py-3 border-b border-dark-700 flex items-center justify-between">
-        <p className="text-sm font-semibold text-white">{title}</p>
-        <span className="text-[11px] uppercase tracking-wider text-slate-500">Full Frame</span>
-      </div>
-      <div className="h-[360px] bg-slate-950 flex items-center justify-center p-3">
-        <img
-          src={src}
-          alt={alt}
-          className="max-w-full max-h-full object-contain rounded border border-dark-700/70"
-          onError={onError}
-        />
-      </div>
-    </div>
-  );
-}
+// ── Page ──────────────────────────────────────────────────────────────
 
 export default function ImageProcessor() {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
-  const [status, setStatus] = useState('idle');
+  const [dimensions, setDimensions] = useState(null);
+  const [status, setStatus] = useState('empty'); // empty | ready | checking | done | error
   const [result, setResult] = useState(null);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [annotatedImageError, setAnnotatedImageError] = useState(false);
+  const [error, setError] = useState('');
+  const [view, setView] = useState('annotated');
+  const [annotatedFailed, setAnnotatedFailed] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [challan, setChallan] = useState({ state: 'idle' }); // idle | checking | exists | creating | created | error
+  const inputRef = useRef(null);
+  const dragDepth = useRef(0);
 
-  const handleFileChange = (e) => {
-    const selected = e.target.files[0];
-    if (selected) {
-      setFile(selected);
-      setPreview(URL.createObjectURL(selected));
-      setStatus('idle');
-      setResult(null);
-      setErrorMessage('');
-      setAnnotatedImageError(false);
+  // Free the object URL when the preview changes
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+
+  const acceptFile = useCallback((selected) => {
+    if (!selected) return;
+    if (!ACCEPTED_TYPES.includes(selected.type)) {
+      setError('That file type is not supported. Use a JPEG, PNG or WebP photo.');
+      setStatus(file ? 'ready' : 'error');
+      return;
     }
-  };
-
-  const resetUpload = () => {
-    setFile(null);
-    setPreview(null);
+    if (selected.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      setError(`That photo is ${formatBytes(selected.size)}. The limit is ${MAX_UPLOAD_MB} MB.`);
+      setStatus(file ? 'ready' : 'error');
+      return;
+    }
+    setFile(selected);
+    setPreview(URL.createObjectURL(selected));
+    setDimensions(null);
     setResult(null);
-    setErrorMessage('');
-    setAnnotatedImageError(false);
-    setStatus('idle');
+    setError('');
+    setView('annotated');
+    setAnnotatedFailed(false);
+    setChallan({ state: 'idle' });
+    setStatus('ready');
+  }, [file]);
+
+  const openPicker = () => inputRef.current?.click();
+
+  const onInputChange = (e) => {
+    acceptFile(e.target.files?.[0]);
+    e.target.value = '';
   };
 
-  const handleUpload = async (e) => {
-    e?.preventDefault();
-    if (!file) return;
-    setStatus('processing');
-    setErrorMessage('');
-    setAnnotatedImageError(false);
-
+  const checkPhoto = async () => {
+    if (!file || status === 'checking') return;
+    setStatus('checking');
+    setError('');
     try {
       const data = await processImage(file);
-      setResult(normalizeResult(data));
-      setStatus('completed');
+      setResult(data);
+      setView('annotated');
+      setAnnotatedFailed(false);
+      setStatus('done');
     } catch (err) {
-      console.error(err);
-      setErrorMessage(getErrorMessage(err));
+      setError(getErrorMessage(err));
       setStatus('error');
     }
   };
 
-  const hasViolations = Boolean(
-    result?.vehicles?.some(vehicle => vehicle.violations?.length > 0)
-    || result?.sceneViolations?.length > 0
-  );
-  const annotatedSrc = assetUrl(result?.annotatedImage);
+  // Drag and drop anywhere on the stage
+  const dropHandlers = {
+    onDragEnter: (e) => {
+      e.preventDefault();
+      if (status === 'checking') return;
+      dragDepth.current += 1;
+      setDragging(true);
+    },
+    onDragOver: (e) => e.preventDefault(),
+    onDragLeave: () => {
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (dragDepth.current === 0) setDragging(false);
+    },
+    onDrop: (e) => {
+      e.preventDefault();
+      dragDepth.current = 0;
+      setDragging(false);
+      if (status === 'checking') return;
+      acceptFile(e.dataTransfer.files?.[0]);
+    },
+  };
+
+  // ── Derived result data ──
+  const vehicles = useMemo(() => result?.vehicles || [], [result]);
+  const sceneViolations = result?.scene_violations || [];
+  const violationTotal = result?.total_violations
+    ?? vehicles.reduce((n, v) => n + (v.violations?.length || 0), 0) + sceneViolations.length;
+  const flaggedVehicles = vehicles.filter((v) => v.violations?.length);
+  const evidenceId = result?.evidence_id;
+  const annotatedSrc = getAssetUrl(result?.annotated_image_path);
+  const canShowAnnotated = Boolean(annotatedSrc && !annotatedFailed);
+  const showingAnnotated = status === 'done' && view === 'annotated' && canShowAnnotated;
+  const plateVehicle = flaggedVehicles.find((v) => v.license_plate);
+
+  // Was a challan already created automatically for this evidence?
+  useEffect(() => {
+    if (!evidenceId || !plateVehicle) return undefined;
+    let cancelled = false;
+    setChallan({ state: 'checking' });
+    getChallans({ plate_number: plateVehicle.license_plate, limit: 50 })
+      .then((data) => {
+        if (cancelled) return;
+        const match = (data?.records || []).find((c) => c.evidence_id === evidenceId);
+        setChallan(match ? { state: 'exists', id: match.challan_id, status: match.status } : { state: 'idle' });
+      })
+      .catch(() => { if (!cancelled) setChallan({ state: 'idle' }); });
+    return () => { cancelled = true; };
+  }, [evidenceId, plateVehicle]);
+
+  const generateChallan = async () => {
+    if (!evidenceId) return;
+    setChallan({ state: 'creating' });
+    try {
+      const data = await manualGenerateChallan(evidenceId);
+      setChallan({ state: 'created', id: data.challan_id });
+    } catch (err) {
+      setChallan({ state: 'error', message: getErrorMessage(err) });
+    }
+  };
+
+  // ── Verdict copy ──
+  let verdict = null;
+  if (status === 'done') {
+    if (vehicles.length === 0 && violationTotal === 0) {
+      verdict = {
+        tone: 'neutral',
+        n: '0',
+        text: <>vehicles<br />found</>,
+        sub: 'Nothing on the road was recognised as a vehicle, so no checks ran. Try a photo where vehicles are clearly visible.',
+      };
+    } else if (violationTotal === 0) {
+      verdict = {
+        tone: 'clear',
+        n: '0',
+        text: <>violations<br />found</>,
+        sub: `${vehicles.length} ${plural(vehicles.length, 'vehicle was', 'vehicles were')} checked. Nothing was saved as evidence.`,
+      };
+    } else {
+      const vehicleText = flaggedVehicles.length === 1
+        ? `one ${vehicleName(flaggedVehicles[0].vehicle_type).toLowerCase()}`
+        : `${countWord(flaggedVehicles.length)} vehicles`;
+      const where = flaggedVehicles.length ? <>on {vehicleText}</> : <>in the scene</>;
+      verdict = {
+        tone: 'violation',
+        n: String(violationTotal),
+        text: <>{plural(violationTotal, 'violation', 'violations')}<br />{where}</>,
+        sub: plateVehicle
+          ? 'The plate was read, so this can become a challan.'
+          : 'No plate could be read, so a challan can’t be created from this photo yet.',
+      };
+    }
+  }
+
+  const stageImage = showingAnnotated ? annotatedSrc : preview;
 
   return (
-    <div className="p-8 h-full flex flex-col overflow-y-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white mb-2">Image Processing</h1>
-        <p className="text-slate-400">Upload single traffic images for instant AI violation detection</p>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-[400px_1fr] gap-8 items-start">
-        <div className="bg-dark-800 rounded-xl p-6 border border-dark-700 shadow-sm xl:sticky xl:top-8">
-          <h2 className="text-xl font-bold text-white mb-2">Upload Traffic Photo</h2>
-          <p className="text-sm text-slate-400 mb-6">
-            Supports JPEG, PNG, and WebP. The AI will analyze vehicles, plates, and violations.
+    <div className="vd-page">
+      <header className="vd-page-head">
+        <div>
+          <h1 className="vd-title">Check a photo</h1>
+          <p className="vd-lede">
+            Upload a road photo. Any violations are saved as evidence you can turn into a challan.
           </p>
+        </div>
+        {file && (
+          <button type="button" className="vd-btn" onClick={openPicker} disabled={status === 'checking'}>
+            <ImageUp aria-hidden="true" />
+            Upload another photo
+          </button>
+        )}
+      </header>
 
-          {preview ? (
-            <div className="relative w-full h-[260px] mb-5 rounded-lg overflow-hidden border border-dark-600 bg-slate-950 flex items-center justify-center p-2">
-              <img src={preview} alt="Upload preview" className="max-w-full max-h-full object-contain rounded" />
-              <button
-                type="button"
-                onClick={resetUpload}
-                className="absolute top-2 right-2 bg-dark-900/80 text-white w-8 h-8 rounded-full hover:bg-danger transition-colors"
-                aria-label="Remove selected image"
-              >
-                &times;
-              </button>
-            </div>
-          ) : (
-            <label className="min-h-56 mb-5 border border-dashed border-dark-600 rounded-lg flex flex-col items-center justify-center text-center cursor-pointer hover:border-primary/70 hover:bg-primary/5 transition-colors">
-              <UploadCloud className="w-12 h-12 text-primary mb-3" />
-              <span className="text-white font-semibold">Choose image</span>
-              <span className="text-sm text-slate-500 mt-1">JPEG, PNG, WebP</span>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={ACCEPTED_TYPES.join(',')}
+        onChange={onInputChange}
+        className="vd-sr"
+        tabIndex={-1}
+        aria-hidden="true"
+      />
+
+      <div className="vd-split">
+        {/* ── Stage ── */}
+        <section
+          className={`vd-stage${dragging && preview ? ' is-over' : ''}`}
+          aria-label="Photo"
+          {...dropHandlers}
+        >
+          {!preview ? (
+            <label className={`vd-drop${dragging ? ' is-over' : ''}`}>
+              <span className="vd-drop-glyph" aria-hidden="true"><Camera /></span>
+              <span className="vd-drop-title">Drop a road photo here</span>
+              <p>Or choose one from your computer. JPEG, PNG or WebP, up to {MAX_UPLOAD_MB} MB.</p>
+              <span className="vd-btn vd-btn--primary">Choose a photo</span>
               <input
                 type="file"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={handleFileChange}
-                className="sr-only"
-                disabled={status === 'processing'}
+                accept={ACCEPTED_TYPES.join(',')}
+                onChange={onInputChange}
+                className="vd-sr"
               />
             </label>
-          )}
-
-          <button
-            type="button"
-            onClick={handleUpload}
-            disabled={!file || status === 'processing'}
-            className="w-full bg-primary hover:bg-blue-600 text-white px-5 py-3 rounded-lg font-medium shadow-lg transition-colors disabled:opacity-50 flex items-center justify-center"
-          >
-            {status === 'processing' ? (
-              <>Processing AI Models...</>
-            ) : (
-              <><Camera className="w-5 h-5 mr-2" /> Detect Violations</>
-            )}
-          </button>
-        </div>
-
-        <div className="bg-dark-800 rounded-xl p-6 border border-dark-700 shadow-sm min-h-[640px]">
-          <div className="flex items-center justify-between gap-4 mb-6">
-            <div>
-              <h2 className="text-xl font-bold text-white">Analysis Results</h2>
-              <p className="text-sm text-slate-400 mt-1">Evidence package, detections, and vehicle-level details</p>
-            </div>
-            {result?.evidence_id && (
-              <div className="text-right">
-                <p className="text-xs uppercase tracking-wider text-slate-500">Evidence ID</p>
-                <p className="font-mono text-sm text-white">{result.evidence_id}</p>
-              </div>
-            )}
-          </div>
-
-          {status === 'idle' || !status ? (
-            <div className="min-h-[520px] flex flex-col items-center justify-center text-slate-500">
-              <ImageIcon className="w-12 h-12 mb-4 opacity-50" />
-              <p>No active scan. Upload an image to begin.</p>
-            </div>
-          ) : status === 'processing' ? (
-            <div className="min-h-[520px] flex flex-col items-center justify-center">
-              <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
-              <p className="text-primary font-medium">Running YOLOv11 & OCR Models...</p>
-            </div>
-          ) : status === 'error' ? (
-            <div className="flex items-center text-danger bg-danger/10 p-4 rounded-lg border border-danger/20">
-              <AlertCircle className="w-6 h-6 mr-3" />
-              <p className="text-sm">{errorMessage}</p>
-            </div>
-          ) : status === 'completed' && result ? (
-            <div className="space-y-6">
-              <div className="bg-success/10 border border-success/20 rounded-lg p-4 flex items-center">
-                <CheckCircle2 className="w-8 h-8 text-success mr-4 shrink-0" />
-                <div>
-                  <h3 className="text-white font-bold">Analysis Complete</h3>
-                  <p className="text-slate-300 text-sm">
-                    Found {result.vehicleCount} vehicles and {result.violationCount} violations.
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <MetricTile icon={Camera} label="Vehicles" value={result.vehicleCount} />
-                <MetricTile icon={ShieldAlert} label="Violations" value={result.violationCount} tone={result.violationCount > 0 ? 'danger' : 'success'} />
-                <MetricTile icon={Clock3} label="Processing" value={formatMs(result.processing_time_ms)} tone="warning" />
-                <MetricTile icon={FileText} label="Evidence" value={result.evidence_id ? 'Saved' : 'N/A'} tone={result.evidence_id ? 'success' : 'primary'} />
-              </div>
-
-              <div>
-                <div className="flex items-end justify-between gap-4 mb-3">
-                  <div>
-                    <h4 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Evidence Images</h4>
-                    <p className="text-xs text-slate-500 mt-1">Images are contained to show the full frame without cropping.</p>
-                  </div>
-                </div>
-                {annotatedSrc && !annotatedImageError ? (
-                  <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
-                    {preview && (
-                      <ImageReviewFrame title="Original Upload" src={preview} alt="Original upload" />
-                    )}
-                    <ImageReviewFrame
-                      title="AI Annotated Evidence"
-                      src={annotatedSrc}
-                      alt="Annotated result"
-                      onError={() => setAnnotatedImageError(true)}
-                    />
+          ) : (
+            <>
+              <div className="vd-stage-bar">
+                {status === 'done' && canShowAnnotated ? (
+                  <div className="vd-seg" role="group" aria-label="Photo view">
+                    <button type="button" aria-pressed={view === 'annotated'} onClick={() => setView('annotated')}>
+                      Annotated
+                    </button>
+                    <button type="button" aria-pressed={view === 'original'} onClick={() => setView('original')}>
+                      Original
+                    </button>
                   </div>
                 ) : (
-                  <div className="p-5 bg-dark-900 border border-dark-700 rounded-lg text-slate-400">
-                    Annotated image is not available. Restart the FastAPI backend after this update so `/evidence` files are served.
-                  </div>
+                  <span>{status === 'checking' ? 'Checking for vehicles, riders and plates' : 'Original photo'}</span>
                 )}
+                <span>
+                  {result?.image_width
+                    ? `${result.image_width} × ${result.image_height} px`
+                    : dimensions && `${dimensions.w} × ${dimensions.h} px`}
+                </span>
               </div>
 
-              <div>
-                <h4 className="text-sm font-semibold text-slate-400 mb-3 uppercase tracking-wider">Vehicle Details</h4>
-                {result.vehicles.length > 0 ? (
-                  <div className="space-y-3">
-                    {result.vehicles.map((vehicle) => {
-                      const vehicleViolations = vehicle.violations || [];
-                      const bestConfidence = vehicleViolations[0]?.confidence ?? vehicle.confidence;
-
-                      return (
-                        <div key={vehicle.vehicle_id} className="bg-dark-900 border border-dark-700 rounded-lg p-4">
-                          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                            <div>
-                              <p className="text-white font-bold">
-                                Vehicle #{vehicle.vehicle_id ?? '-'} - {(vehicle.vehicle_type || 'vehicle').toUpperCase()}
-                              </p>
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
-                                <div>
-                                  <p className="text-xs uppercase tracking-wider text-slate-500">License Plate</p>
-                                  <p className="font-mono text-white">{vehicle.license_plate || vehicle.plate_number || 'Not detected'}</p>
-                                </div>
-                                <div>
-                                  <p className="text-xs uppercase tracking-wider text-slate-500">Plate Confidence</p>
-                                  <p className="text-white">{formatConfidence(vehicle.plate_confidence)}</p>
-                                </div>
-                                <div>
-                                  <p className="text-xs uppercase tracking-wider text-slate-500">Violation Confidence</p>
-                                  <p className="text-white">{formatConfidence(bestConfidence)}</p>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2 text-slate-400">
-                              <Gauge className="w-4 h-4" />
-                              <span className="text-sm">{vehicleViolations.length} flagged</span>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-2 mt-4">
-                            {vehicleViolations.length > 0 ? (
-                              vehicleViolations.map((viol, idx) => (
-                                <ViolationBadge key={`${viol.type || viol}-${idx}`} type={viol.type || viol} />
-                              ))
-                            ) : (
-                              <span className="text-sm text-success">No violations</span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {result.sceneViolations.length > 0 && (
-                      <div className="bg-dark-900 border border-dark-700 rounded-lg p-4">
-                        <p className="text-white font-bold mb-3">Scene Violations</p>
-                        <div className="flex flex-wrap gap-2">
-                          {result.sceneViolations.map((viol, idx) => (
-                            <ViolationBadge key={`${viol.type}-${idx}`} type={viol.type} />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="p-4 bg-dark-900 border border-dark-700 rounded-lg text-slate-400 text-center">
-                    No vehicles detected in this image.
-                  </div>
-                )}
+              <div className="vd-stage-frame">
+                <span className="vd-stage-media">
+                  <img
+                    src={stageImage}
+                    alt={showingAnnotated ? 'Photo with detected vehicles and violations marked' : 'Uploaded road photo'}
+                    onLoad={(e) => {
+                      if (!showingAnnotated) setDimensions({ w: e.target.naturalWidth, h: e.target.naturalHeight });
+                    }}
+                    onError={() => { if (showingAnnotated) setAnnotatedFailed(true); }}
+                  />
+                  {status === 'checking' && <span className="vd-scan" aria-hidden="true" />}
+                </span>
               </div>
 
-              {!hasViolations && (
-                <div className="p-4 bg-success/10 border border-success/20 rounded-lg text-success text-center">
-                  No traffic violations detected in this image.
+              {status === 'done' && (
+                <div className="vd-stage-meta">
+                  {evidenceId && <span>Evidence <b>{evidenceId}</b></span>}
+                  {evidenceId && <span>Saved <b>{formatTime(result.timestamp)}</b></span>}
+                  <span>Analysed in <b>{formatDuration(result.processing_time_ms)}</b></span>
+                  {!evidenceId && <span>Not saved, since nothing was flagged</span>}
                 </div>
               )}
-            </div>
-          ) : null}
-        </div>
+            </>
+          )}
+        </section>
+
+        {/* ── Record panel ── */}
+        <aside className="vd-record" aria-live="polite">
+          {status === 'empty' && (
+            <>
+              <h2 className="vd-heading">What gets checked</h2>
+              <p className="vd-sub">Each vehicle in the photo goes through the checks that apply to it.</p>
+              <ul className="vd-checks">
+                {CHECKS.map(({ icon: Icon, name, text }) => (
+                  <li key={name}>
+                    <Icon aria-hidden="true" />
+                    <b>{name}</b>
+                    <span>{text}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {(status === 'ready' || (status === 'error' && file)) && (
+            <>
+              <h2 className="vd-heading">Ready to check</h2>
+              <div className="vd-file">
+                <b title={file.name}>{file.name}</b>
+                <span>{formatBytes(file.size)}</span>
+              </div>
+              <p className="vd-sub">
+                The check usually takes 5 to 15 seconds. If anything is flagged, the photo is saved as evidence.
+              </p>
+              {error && <div className="vd-callout" data-tone="error" style={{ marginTop: 16 }}>{error}</div>}
+              <div className="vd-actions">
+                <button type="button" className="vd-btn vd-btn--primary vd-btn--block" onClick={checkPhoto}>
+                  {status === 'error' ? 'Try again' : 'Check photo'}
+                </button>
+                <button type="button" className="vd-btn vd-btn--block" onClick={openPicker}>
+                  Choose a different photo
+                </button>
+              </div>
+            </>
+          )}
+
+          {status === 'error' && !file && (
+            <div className="vd-callout" data-tone="error">{error}</div>
+          )}
+
+          {status === 'checking' && (
+            <>
+              <h2 className="vd-heading">Checking the photo</h2>
+              <p className="vd-sub">
+                Finding vehicles first, then checking helmets, riders, seatbelts and signals for each one,
+                and reading number plates. This usually takes 5 to 15 seconds.
+              </p>
+            </>
+          )}
+
+          {status === 'done' && verdict && (
+            <>
+              <div className="vd-verdict" data-tone={verdict.tone}>
+                <span className="vd-verdict-n">{verdict.n}</span>
+                <span className="vd-verdict-text">{verdict.text}</span>
+              </div>
+              <p className="vd-sub">{verdict.sub}</p>
+
+              {flaggedVehicles.length > 0 && <hr className="vd-rule" />}
+              {flaggedVehicles.map((vehicle) => (
+                <VehicleRecord key={vehicle.vehicle_id} vehicle={vehicle} showPlate />
+              ))}
+
+              {sceneViolations.length > 0 && (
+                <>
+                  <hr className="vd-rule" />
+                  <p className="vd-section-label">Whole scene</p>
+                  <div className="vd-findings" style={{ marginTop: 0 }}>
+                    {toFindings(sceneViolations).map((f) => <Finding key={f.key} {...f} />)}
+                  </div>
+                </>
+              )}
+
+              {violationTotal > 0 && <ThresholdLegend />}
+
+              {vehicles.length > flaggedVehicles.length && violationTotal > 0 && (
+                <p className="vd-legend" style={{ marginTop: 6 }}>
+                  {vehicles.length - flaggedVehicles.length} other{' '}
+                  {plural(vehicles.length - flaggedVehicles.length, 'vehicle', 'vehicles')} had no violations.
+                </p>
+              )}
+
+              {evidenceId && (
+                <div className="vd-actions">
+                  {challan.state === 'exists' || challan.state === 'created' ? (
+                    <div className="vd-callout" data-tone="ok">
+                      {challan.state === 'exists' ? 'A challan was created automatically: ' : 'Challan created: '}
+                      <Link className="vd-link" to={`/challan/${challan.id}`}>{challan.id}</Link>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="vd-btn vd-btn--primary vd-btn--block"
+                      onClick={generateChallan}
+                      disabled={!plateVehicle || challan.state === 'creating' || challan.state === 'checking'}
+                      title={plateVehicle ? undefined : 'A readable plate is needed to create a challan'}
+                    >
+                      {challan.state === 'creating' ? 'Creating challan…' : 'Generate challan'}
+                    </button>
+                  )}
+                  {challan.state === 'error' && (
+                    <div className="vd-callout" data-tone="error">{challan.message}</div>
+                  )}
+                  <a className="vd-btn vd-btn--block" href={getEvidenceDownloadUrl(evidenceId)}>
+                    Download evidence (.zip)
+                  </a>
+                  <Link className="vd-btn vd-btn--block" to={`/evidence/${evidenceId}`}>
+                    Open evidence record
+                  </Link>
+                </div>
+              )}
+
+              {!evidenceId && (
+                <div className="vd-actions">
+                  <button type="button" className="vd-btn vd-btn--block" onClick={openPicker}>
+                    Check another photo
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </aside>
       </div>
     </div>
   );

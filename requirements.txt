@@ -8,6 +8,7 @@ python-multipart>=0.0.9
 python-dotenv>=1.0.0
 easyocr>=1.7.0
 paddleocr>=3.0.0
+paddlepaddle>=3.0.0; python_version < "3.14"  # PaddleOCR runtime; no wheels for 3.14+ (EasyOCR is used instead)
 qrcode>=7.3.1
 reportlab>=4.0.0
 imageio-ffmpeg>=0.4.9

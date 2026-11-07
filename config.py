@@ -41,6 +41,19 @@ MODEL_WEIGHTS = {
     "plate":           OUTPUTS_DIR / "plate"           / "weights" / "best.pt",
 }
 
+# ── Which weights to use for vehicle + triple-riding detection ───────────
+# VEHICLE_MODEL:
+#   "ensemble" (default) = COCO yolo11n.pt finds motorcycles/cars/buses/trucks,
+#                          your custom model adds autorickshaws (COCO has no such class).
+#   "custom"   = only your trained model (missed vehicles on some web photos).
+#   "coco"     = only stock yolo11n.pt (no autorickshaw).
+# TRIPLE_RIDING_MODEL: "custom" (your model, adds rider_region) or "coco".
+# If a model fails to load, the detector falls back to the other automatically.
+# Override in .env, e.g.  VEHICLE_MODEL=coco
+VEHICLE_MODEL = os.getenv("VEHICLE_MODEL", "ensemble").strip().lower()
+TRIPLE_RIDING_MODEL = os.getenv("TRIPLE_RIDING_MODEL", "custom").strip().lower()
+COCO_MODEL_PATH = "yolo11n.pt"
+
 # ── Detection Confidence Thresholds ──────────────────────────────────────
 # Tuned per actual validation metrics in training_summary.md / training_summary.json.
 #   vehicle  (mAP50=0.881)          -> custom model, slightly tighter than default
@@ -51,7 +64,7 @@ MODEL_WEIGHTS = {
 #   triple_riding  (mAP50=0.871)    -> moderate
 #   illegal_parking (mAP50=0.941)   -> reliable
 CONFIDENCE_THRESHOLDS = {
-    "vehicle":         0.25,  # Robust COCO vehicle detection
+    "vehicle":         0.25,  # same threshold for custom and COCO weights
     "helmet":          0.10,  # Lowered to aggressively catch NoHelmet on difficult/filtered images
     "seatbelt":        0.70,  # Raised to stop 60-66% false positives when driver is wearing a seatbelt
     "triple_riding":   0.30,  # Lowered to detect tiny, occluded children with standard YOLO

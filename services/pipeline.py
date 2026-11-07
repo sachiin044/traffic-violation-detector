@@ -174,6 +174,80 @@ class InferencePipeline:
             })
         return info
 
+    # ── Per-rider helmet check ───────────────────────────────────────────
+
+    # Stricter than the whole-bike helmet threshold, since these are extra checks
+    PER_RIDER_HELMET_MIN_CONF = 0.25
+
+    def _per_rider_helmet_checks(
+        self,
+        crop: np.ndarray,
+        rider_dets: List[Detection],
+        helmet_dets: List[Detection],
+    ) -> List[Detection]:
+        """
+        Run the helmet model on each detected rider's head area (crop coords).
+        Returns only NEW Helmet/NoHelmet detections for heads that the
+        whole-bike pass did not already cover, so existing results never change.
+        """
+        head_classes = (HelmetDetector.CLS_HELMET, HelmetDetector.CLS_NO_HELMET)
+        known = [d for d in helmet_dets if d.class_name in head_classes]
+        added: List[Detection] = []
+        h, w = crop.shape[:2]
+
+        def center_in(box: BBox, other: BBox) -> bool:
+            cx, cy = (box.x1 + box.x2) / 2, (box.y1 + box.y2) / 2
+            return other.x1 <= cx <= other.x2 and other.y1 <= cy <= other.y2
+
+        for person in rider_dets:
+            if person.class_name != "person":
+                continue
+            pb = person.bbox
+            bw, bh = pb.x2 - pb.x1, pb.y2 - pb.y1
+            if bw < 8 or bh < 8:
+                continue
+            # Head + shoulders: top ~45% of the person box, slightly padded
+            hx1 = int(max(0, pb.x1 - 0.15 * bw))
+            hx2 = int(min(w, pb.x2 + 0.15 * bw))
+            hy1 = int(max(0, pb.y1 - 0.10 * bh))
+            hy2 = int(min(h, pb.y1 + 0.45 * bh))
+            if hx2 - hx1 < 8 or hy2 - hy1 < 8:
+                continue
+
+            try:
+                dets = self.helmet_detector.detect(crop[hy1:hy2, hx1:hx2])
+            except Exception as e:
+                logger.warning(f"Per-rider helmet check failed: {e}")
+                continue
+            dets = [
+                d for d in dets
+                if d.class_name in head_classes and d.confidence >= self.PER_RIDER_HELMET_MIN_CONF
+            ]
+            if not dets:
+                continue
+
+            best = max(dets, key=lambda d: d.confidence)
+            head = BBox(
+                x1=best.bbox.x1 + hx1, y1=best.bbox.y1 + hy1,
+                x2=best.bbox.x2 + hx1, y2=best.bbox.y2 + hy1,
+            )
+            already = any(
+                self.rules._bbox_iou(e.bbox, head) > 0.3
+                or center_in(head, e.bbox) or center_in(e.bbox, head)
+                for e in known + added
+            )
+            if not already:
+                added.append(Detection(
+                    class_name=best.class_name,
+                    confidence=best.confidence,
+                    bbox=head,
+                    model_source=best.model_source,
+                ))
+
+        if added:
+            logger.info(f"Per-rider helmet check added {len(added)} head(s)")
+        return added
+
     # ── Core Inference ───────────────────────────────────────────────────
 
     def predict(
@@ -290,13 +364,31 @@ class InferencePipeline:
             violations: List[Violation] = []
             all_dets: List[Detection] = [v_det]
 
+            def to_full(dets: List[Detection], ox: int = cx1, oy: int = cy1) -> List[Detection]:
+                """Shift crop-relative detections into full-image coordinates."""
+                return [
+                    Detection(
+                        class_name=d.class_name,
+                        confidence=d.confidence,
+                        bbox=BBox(x1=d.bbox.x1 + ox, y1=d.bbox.y1 + oy,
+                                  x2=d.bbox.x2 + ox, y2=d.bbox.y2 + oy),
+                        model_source=d.model_source,
+                    )
+                    for d in dets
+                ]
+
             # ── Route to sub-detectors based on vehicle type ─────────
             if v_type in TWO_WHEELER_TYPES:
                 # Motorcycle/Bicycle → Helmet + Triple Riding + Plate
                 helmet_dets = self.helmet_detector.detect(crop)
                 triple_dets = self.triple_riding_detector.detect(crop)
-                all_dets.extend(helmet_dets)
-                all_dets.extend(triple_dets)
+                # Re-check each rider's head on its own to catch heads the
+                # whole-bike pass missed (e.g. a half-hidden middle passenger)
+                helmet_dets = helmet_dets + self._per_rider_helmet_checks(
+                    crop, triple_dets, helmet_dets
+                )
+                all_dets.extend(to_full(helmet_dets))
+                all_dets.extend(to_full(triple_dets))
 
                 # Helmet violations
                 helmet_viols = self.rules.check_helmet(helmet_dets)
@@ -309,7 +401,7 @@ class InferencePipeline:
             elif v_type in FOUR_WHEELER_TYPES:
                 # Car/Bus/Truck → Seatbelt + Plate
                 seatbelt_dets = self.seatbelt_detector.detect(crop)
-                all_dets.extend(seatbelt_dets)
+                all_dets.extend(to_full(seatbelt_dets))
 
                 # Seatbelt violations (direct model output)
                 seatbelt_viols = self.rules.check_seatbelt(seatbelt_dets)
@@ -472,7 +564,9 @@ class InferencePipeline:
                 annotated_image=annotated,
                 vehicle_results=vehicle_results,
                 scene_violations=scene_violations,
-                processing_time_ms=elapsed_ms
+                processing_time_ms=elapsed_ms,
+                evidence_id=evidence_id,
+                timestamp=timestamp,
             )
             
             # Save to MongoDB

@@ -131,9 +131,15 @@ class ViolationRuleEngine:
         # We use the confidence of the 3rd most confident person detection
         if num_persons >= 3:
             sorted_persons = sorted(persons, key=lambda p: p.confidence, reverse=True)
+            # The 3rd person is often partly hidden, so its score is low even when
+            # the scene is clear. If the model also saw a rider_region (the
+            # "overloaded bike" class), use the stronger of the two scores.
+            confidence = sorted_persons[2].confidence
+            if regions:
+                confidence = max(confidence, max(r.confidence for r in regions))
             violations.append(Violation(
                 type=ViolationRuleEngine.TRIPLE_RIDING,
-                confidence=sorted_persons[2].confidence,  # Confidence of the 3rd person
+                confidence=confidence,
             ))
             return violations
 

@@ -52,13 +52,18 @@ class EvidenceManager:
         vehicle_results: List[VehicleResult],
         scene_violations: List[Violation],
         processing_time_ms: float,
+        evidence_id: Optional[str] = None,
+        timestamp: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a new evidence package folder and save all files.
-        Returns the dictionary representing the MongoDB document.
+        Returns the dictionary representing the database record.
+
+        Pass the evidence_id that was already printed on the annotated image
+        so the image, the folder, the DB row and the API response all agree.
         """
-        evidence_id = self.generate_evidence_id()
-        timestamp = datetime.now(timezone.utc).isoformat()
+        evidence_id = evidence_id or self.generate_evidence_id()
+        timestamp = timestamp or datetime.now(timezone.utc).isoformat()
         
         # 1. Create directory
         evidence_path = self.base_dir / evidence_id
@@ -132,6 +137,20 @@ class EvidenceManager:
             
         logger.info(f"[{evidence_id}] Created evidence package in {evidence_path}")
         return report_data
+
+    def load_report(self, evidence_id: str) -> Optional[Dict[str, Any]]:
+        """Load the full report.json (includes per-vehicle data) for an evidence ID."""
+        if not evidence_id or not all(c.isalnum() or c in "-_" for c in evidence_id):
+            return None
+        report_path = self.base_dir / evidence_id / "report.json"
+        if not report_path.is_file():
+            return None
+        try:
+            with open(report_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"[{evidence_id}] Could not read report.json: {e}")
+            return None
 
     def create_zip_package(self, evidence_id: str) -> Optional[str]:
         """

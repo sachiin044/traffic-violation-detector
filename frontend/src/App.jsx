@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import DashboardOverview from './pages/DashboardOverview';
 import Analytics from './pages/Analytics';
@@ -10,10 +10,16 @@ import ChallanExplorer from './pages/ChallanExplorer';
 import ChallanDetails from './pages/ChallanDetails';
 import EvidenceExplorer from './pages/EvidenceExplorer';
 import EvidenceDetails from './pages/EvidenceDetails';
+// The QR code on challan PDFs points to /verify/challan/:id
+function VerifyChallan() {
+  const { id } = useParams();
+  return <Navigate to={`/challan/${id}`} replace />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="flex h-screen bg-dark-900 overflow-hidden font-sans">
+      <div className="flex h-screen overflow-hidden" style={{ background: 'var(--vd-ground)' }}>
         <Sidebar />
         <main className="flex-1 overflow-y-auto">
           <Routes>
@@ -26,6 +32,7 @@ export default function App() {
             <Route path="/enforcement" element={<EnforcementCenter />} />
             <Route path="/challans" element={<ChallanExplorer />} />
             <Route path="/challan/:id" element={<ChallanDetails />} />
+            <Route path="/verify/challan/:id" element={<VerifyChallan />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

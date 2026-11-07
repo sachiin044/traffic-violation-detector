@@ -10,6 +10,11 @@ export const api = axios.create({
   },
 });
 
+export const getHealth = async () => {
+  const response = await api.get('/health', { timeout: 5000 });
+  return response.data;
+};
+
 export const getDashboardSummary = async () => {
   const response = await api.get('/dashboard/summary');
   return response.data;
@@ -50,11 +55,13 @@ export const getAssetUrl = (path) => {
   return `${API_URL}${path.startsWith('/') ? path : `/${path}`}`;
 };
 
-export const processVideo = async (file, cameraId) => {
+export const processVideo = async (file, cameraId, onUploadProgress) => {
   const formData = new FormData();
   formData.append('file', file);
-  const response = await api.post(`/video/predict?camera_id=${cameraId}`, formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+  const response = await api.post('/video/predict', formData, {
+    params: { camera_id: cameraId },
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress,
   });
   return response.data;
 };

@@ -60,6 +60,12 @@ async def generate_challan_manual(evidence_id: str = Query(...)):
     evidence = pipe.db.get_evidence(evidence_id)
     if not evidence:
         raise HTTPException(status_code=404, detail="Evidence not found")
+
+    # The DB row has no per-vehicle data; merge in report.json, which does.
+    report = pipe.evidence_manager.load_report(evidence_id)
+    if report:
+        report.update({k: v for k, v in evidence.items() if v is not None})
+        evidence = report
         
     # We must load the ChallanManager
     from engine.challan import ChallanManager
