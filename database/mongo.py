@@ -297,6 +297,20 @@ class MongoDB:
         ''', (task_id, filename, "processing", 0, 0))
         self.conn.commit()
 
+    def fail_interrupted_video_tasks(self) -> int:
+        """
+        Video jobs run in a background thread inside the server process, so a
+        restart (including uvicorn --reload) kills them. Mark any job still
+        'processing' at startup as stopped so clients don't wait forever.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE video_tasks SET status = 'error', error = ? WHERE status = 'processing'",
+            ("The server restarted before this video finished, so processing stopped. Upload the video again.",),
+        )
+        self.conn.commit()
+        return cursor.rowcount
+
     def update_video_task(self, task_id: str, update_data: Dict[str, Any]) -> None:
         if not update_data: return
         cursor = self.conn.cursor()

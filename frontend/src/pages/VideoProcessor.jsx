@@ -94,7 +94,7 @@ export default function VideoProcessor() {
           setStatus('done');
         } else if (task.status === 'error') {
           storage.clear();
-          setError(task.error ? `Processing failed: ${task.error}` : 'Processing failed. Check the backend log for details.');
+          setError(task.error || 'Processing failed. Check the backend log for details.');
           setStatus('error');
         }
       } catch (err) {
@@ -112,6 +112,15 @@ export default function VideoProcessor() {
     const timer = setInterval(poll, POLL_MS);
     return () => { stopped = true; clearInterval(timer); };
   }, [status, taskId, file]);
+
+  // Forget a job the page is waiting on (the backend may still be running it)
+  const stopWaiting = () => {
+    storage.clear();
+    setTaskId(null);
+    setProgress(0);
+    setFound(0);
+    setStatus(file ? 'ready' : 'empty');
+  };
 
   const drop = {
     onDragOver: (e) => { e.preventDefault(); if (status !== 'uploading' && status !== 'processing') setDragging(true); },
@@ -255,7 +264,19 @@ export default function VideoProcessor() {
                 <span>{formatNumber(found)} {plural(found, 'violation', 'violations')} so far</span>
                 <b>{progress}%</b>
               </div>
-              <p className="vd-sub">You can leave this page. The job keeps running and this page picks it up again when you come back.</p>
+              <p className="vd-sub">
+                {progress === 0
+                  ? 'Starting up. On a CPU the first percent can take a minute or two, longer for high-resolution video.'
+                  : 'You can leave this page. The job keeps running and this page picks it up again when you come back.'}
+              </p>
+              <p className="vd-legend">
+                Restarting the backend stops the job. If that happens, this page says so and you can upload again.
+              </p>
+              <div className="vd-actions">
+                <button type="button" className="vd-btn vd-btn--block" onClick={stopWaiting}>
+                  Stop waiting
+                </button>
+              </div>
             </>
           )}
 

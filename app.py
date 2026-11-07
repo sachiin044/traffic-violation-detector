@@ -40,6 +40,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Could not connect to MongoDB: {e}")
 
+    # Video jobs left 'processing' by a previous run can never finish now
+    try:
+        stopped = pipeline.db.fail_interrupted_video_tasks()
+        if stopped:
+            logger.warning(f"Marked {stopped} interrupted video job(s) as stopped")
+    except Exception as e:
+        logger.error(f"Could not clean up interrupted video jobs: {e}")
+
     # Inject pipeline into router
     predict.set_pipeline(pipeline)
 

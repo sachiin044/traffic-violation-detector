@@ -230,8 +230,8 @@ class VideoInferencePipeline:
                 
                 writer.write(frame)
                 
-                # Update task progress occasionally
-                if frame_idx % 10 == 0:
+                # Update task progress often enough that slow CPUs don't look stuck
+                if frame_idx % 5 == 0:
                     progress = int((frame_idx / total_frames) * 100) if total_frames > 0 else 0
                     thread_db.update_video_task(task_id, {"progress": progress, "violations_found": violations_found})
                     
