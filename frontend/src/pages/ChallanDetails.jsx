@@ -4,8 +4,8 @@ import { Download, FileText } from 'lucide-react';
 import { getChallanDetails, getChallanPdfUrl, updateChallanStatus } from '../services/api';
 import useRequest from '../lib/useRequest';
 import { challanStatus, vehicleName, violationName } from '../lib/violations';
-import { errorMessage, formatDateTime, inr } from '../lib/format';
-import { ErrorState, Finding, PageHead, Plate, SkeletonRows, StatusPill, ThresholdLegend } from '../components/desk';
+import { errorMessage, formatDateTime, inr, plural } from '../lib/format';
+import { ErrorState, Finding, PageHead, Plate, RegisteredAt, SkeletonRows, StatusPill, ThresholdLegend } from '../components/desk';
 
 // What an officer can do next from each status
 const NEXT_STEPS = {
@@ -97,6 +97,11 @@ export default function ChallanDetails() {
   }
 
   const steps = NEXT_STEPS[status] || [];
+  // Newer challans list every offence; older ones only have the single violation
+  const offences = challan.offences?.length
+    ? challan.offences
+    : [{ type: challan.violation_type, confidence: challan.confidence, amount: challan.fine_amount }];
+  const hasCourt = offences.some((o) => o.court);
   const pdfUrl = getChallanPdfUrl(challan.challan_id);
 
   return (
@@ -150,15 +155,39 @@ export default function ChallanDetails() {
             <div className="vd-callout" data-tone="error" role="alert" style={{ marginBottom: 18 }}>{action.message}</div>
           )}
 
-          <div className="vd-amount">{inr(challan.fine_amount)}</div>
-          <p className="vd-sub">Fine for {violationName(challan.violation_type).toLowerCase()}.</p>
+          <div className="vd-amount">{inr(challan.fine_amount)}{hasCourt && '*'}</div>
+          <p className="vd-sub">
+            Total penalty for {offences.length} {plural(offences.length, 'offence', 'offences')} under the Motor Vehicles Act.
+            {hasCourt && ' * Includes a court challan, so the final amount is decided by the court.'}
+          </p>
 
           <hr className="vd-rule" />
           <Plate plate={challan.plate_number} />
           <p className="vd-plate-note">{vehicleName(challan.vehicle_type)}</p>
+          {challan.registered_at ? (
+            <p className="vd-plate-note">
+              Registered in <strong style={{ color: 'var(--vd-ink)' }}>{challan.registered_at}</strong>.
+            </p>
+          ) : (
+            <RegisteredAt plate={challan.plate_number} />
+          )}
 
           <div className="vd-findings">
-            <Finding name={violationName(challan.violation_type)} confidence={challan.confidence} />
+            {offences.map((o) => (
+              <div key={o.type}>
+                <Finding
+                  name={violationName(o.type)}
+                  detail={o.section ? `Sec. ${o.section}` : ''}
+                  confidence={o.confidence}
+                />
+                {Number.isFinite(Number(o.amount)) && (
+                  <p className="vd-legend" style={{ marginTop: 0, marginBottom: 6 }}>
+                    Penalty {inr(o.amount)}{o.court ? ' minimum, court decides' : ''}
+                    {o.note && !o.court ? `. ${o.note}.` : ''}
+                  </p>
+                )}
+              </div>
+            ))}
           </div>
           <ThresholdLegend />
 
@@ -172,6 +201,12 @@ export default function ChallanDetails() {
             <dd>{formatDateTime(challan.timestamp)}</dd>
             <dt>Challan created</dt>
             <dd>{formatDateTime(challan.created_at)}</dd>
+            {challan.location && (
+              <>
+                <dt>Place of offence</dt>
+                <dd>{challan.location}{challan.camera_id ? `, ${challan.camera_id}` : ''}</dd>
+              </>
+            )}
             <dt>Evidence</dt>
             <dd><Link className="vd-link" to={`/evidence/${challan.evidence_id}`}>{challan.evidence_id}</Link></dd>
           </dl>

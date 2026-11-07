@@ -1,8 +1,39 @@
 {
-  "Helmet Non Compliance": 1000,
-  "Seatbelt Non Compliance": 1000,
-  "Triple Riding": 2000,
-  "Red Light Violation": 5000,
-  "Wrong Side Driving": 5000,
-  "Illegal Parking": 500
+  "_comment": "Penalties under the Motor Vehicles Act, 1988 (as amended in 2019). Amounts follow the Delhi Traffic Police fine list; some states compound differently, so adjust for your state. 'court': true means the amount is decided by a court and 'amount' is the minimum.",
+  "Helmet Non Compliance": {
+    "offence": "Riding without a protective helmet (rider or pillion rider)",
+    "section": "194D",
+    "amount": 1000,
+    "note": "Driving licence liable to be disqualified for 3 months"
+  },
+  "Seatbelt Non Compliance": {
+    "offence": "Driving or travelling without wearing a seat belt",
+    "section": "194B",
+    "amount": 1000
+  },
+  "Triple Riding": {
+    "offence": "Carrying more than one pillion rider on a two-wheeler",
+    "section": "194C",
+    "amount": 1000,
+    "note": "Driving licence liable to be disqualified for 3 months"
+  },
+  "Red Light Violation": {
+    "offence": "Jumping a red light",
+    "section": "184",
+    "amount": 1000,
+    "court": true,
+    "note": "Court challan: penalty decided by the court"
+  },
+  "Wrong Side Driving": {
+    "offence": "Driving against the authorised flow of traffic",
+    "section": "184",
+    "amount": 1000,
+    "court": true,
+    "note": "Court challan: penalty decided by the court"
+  },
+  "Illegal Parking": {
+    "offence": "Improper or obstructive parking",
+    "section": "122 read with 177",
+    "amount": 500
+  }
 }

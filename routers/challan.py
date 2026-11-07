@@ -67,50 +67,14 @@ async def generate_challan_manual(evidence_id: str = Query(...)):
         report.update({k: v for k, v in evidence.items() if v is not None})
         evidence = report
         
-    # We must load the ChallanManager
-    from engine.challan import ChallanManager
-    manager = ChallanManager(pipe.db)
-    
-    # We will forcefully evaluate it. For manual, we skip threshold check
-    # so we'll just mock the evaluation by running evaluate_evidence but setting 
-    # it to bypass, or just building it directly.
-    # For hackathon simplicity, we just run evaluate_evidence and hope it meets threshold,
-    # but let's just do a direct build to guarantee generation if they requested it manually.
-    
-    vehicles = evidence.get("vehicles", [])
-    target_vehicle = None
-    target_violation = None
-    for v in vehicles:
-        if v.get("license_plate") and v.get("violations"):
-            target_vehicle = v
-            target_violation = v["violations"][0]
-            break
-            
-    if not target_vehicle:
+    # Same builder as the automatic path: one challan for the vehicle, all its offences.
+    # An officer asked for it, so it skips the confidence threshold.
+    vehicle = pipe.challan_manager._target_vehicle(evidence)
+    if not vehicle:
         raise HTTPException(status_code=400, detail="Evidence has no detected license plate")
-        
-    challan_id = manager.generate_challan_id()
-    v_type = target_violation["type"]
-    fine_amount = manager.fines_config.get(v_type, 1000)
-    
-    challan_data = {
-        "challan_id": challan_id,
-        "evidence_id": evidence_id,
-        "plate_number": target_vehicle["license_plate"],
-        "vehicle_type": target_vehicle["vehicle_type"],
-        "violation_type": v_type,
-        "fine_amount": fine_amount,
-        "confidence": target_violation["confidence"],
-        "timestamp": evidence["timestamp"],
-        "location": evidence.get("location", "Smart City Checkpoint"),
-        "status": "GENERATED",
-        "created_at": evidence["timestamp"],
-    }
-    
-    pdf_path = manager.generate_pdf(challan_data, evidence)
-    challan_data["pdf_path"] = f"/outputs/challans/{Path(pdf_path).name}"
-    
-    pipe.db.insert_challan(challan_data)
+
+    challan = pipe.challan_manager.build_challan(evidence, vehicle, status="GENERATED")
+    challan_id = challan["challan_id"]
     return {"message": "Challan generated manually", "challan_id": challan_id}
 
 @router.get("/demo/enforcement")
@@ -118,3 +82,13 @@ async def get_enforcement_demo():
     """Judge Demo endpoint returning high level stats."""
     pipe = _get_pipeline()
     return pipe.db.get_enforcement_demo_stats()
+
+
+@router.get("/rto/{plate}")
+async def rto_lookup(plate: str):
+    """Which RTO a plate is registered with, from its state + district code (e.g. UP93 -> Jhansi)."""
+    from utils.rto import lookup_rto
+    info = lookup_rto(plate)
+    if not info:
+        raise HTTPException(status_code=404, detail="No RTO found for this plate's district code")
+    return info

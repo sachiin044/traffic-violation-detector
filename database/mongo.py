@@ -97,6 +97,12 @@ class MongoDB:
             )
             ''')
             
+            # Newer challan fields; add them to databases created before they existed
+            existing = {row[1] for row in cursor.execute('PRAGMA table_info(challans)')}
+            for column, col_type in (('offences', 'TEXT'), ('location', 'TEXT'), ('camera_id', 'TEXT'), ('pdf_path', 'TEXT'), ('registered_at', 'TEXT')):
+                if column not in existing:
+                    cursor.execute(f'ALTER TABLE challans ADD COLUMN {column} {col_type}')
+
             # Create indexes for fast searching
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_evidence_ts ON evidence(timestamp)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_evidence_plate ON evidence(plate_number)')
@@ -391,8 +397,9 @@ class MongoDB:
         cursor.execute('''
         INSERT INTO challans (
             challan_id, evidence_id, status, fine_amount, plate_number, 
-            timestamp, created_at, violation_type, vehicle_type, confidence
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            timestamp, created_at, violation_type, vehicle_type, confidence,
+            offences, location, camera_id, pdf_path, registered_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             challan_data.get('challan_id'),
             challan_data.get('evidence_id'),
@@ -403,7 +410,12 @@ class MongoDB:
             challan_data.get('created_at'),
             challan_data.get('violation_type'),
             challan_data.get('vehicle_type'),
-            challan_data.get('confidence')
+            challan_data.get('confidence'),
+            json.dumps(challan_data.get('offences') or []),
+            challan_data.get('location'),
+            challan_data.get('camera_id'),
+            challan_data.get('pdf_path'),
+            challan_data.get('registered_at'),
         ))
         self.conn.commit()
         return str(cursor.lastrowid)
@@ -412,7 +424,16 @@ class MongoDB:
         cursor = self.conn.cursor()
         cursor.execute('SELECT * FROM challans WHERE challan_id = ?', (challan_id,))
         row = cursor.fetchone()
-        return dict(row) if row else None
+        return self._challan_dict(row) if row else None
+
+    @staticmethod
+    def _challan_dict(row) -> Dict[str, Any]:
+        d = dict(row)
+        try:
+            d['offences'] = json.loads(d.get('offences') or '[]')
+        except (TypeError, ValueError):
+            d['offences'] = []
+        return d
 
     def update_challan_status(self, challan_id: str, new_status: str) -> bool:
         cursor = self.conn.cursor()
@@ -444,7 +465,7 @@ class MongoDB:
         params.extend([limit, skip])
         
         cursor.execute(query, params)
-        records = [dict(row) for row in cursor.fetchall()]
+        records = [self._challan_dict(row) for row in cursor.fetchall()]
         
         return {"total": total, "records": records}
 

@@ -15,6 +15,12 @@ export const getHealth = async () => {
   return response.data;
 };
 
+// Which RTO a plate is registered with (UP93AB1234 -> Jhansi). 404 when the code isn't known.
+export const getRto = async (plate) => {
+  const response = await api.get(`/rto/${encodeURIComponent(plate)}`);
+  return response.data;
+};
+
 export const getDashboardSummary = async () => {
   const response = await api.get('/dashboard/summary');
   return response.data;

@@ -127,6 +127,14 @@ CHAR_CORRECTIONS_TO_LETTER = {
     "2": "Z", "6": "G", "7": "T",
 }
 
+# ── e-Challan notice ─────────────────────────────────────────────────────────
+# Shown in the PDF header. Keep these generic: the PDF is a demo, not an official notice.
+CHALLAN_AUTHORITY = os.getenv("CHALLAN_AUTHORITY", "Traffic Enforcement Unit")
+CHALLAN_CITY = os.getenv("CHALLAN_CITY", "Bhubaneswar")
+CHALLAN_PAYMENT_DAYS = int(os.getenv("CHALLAN_PAYMENT_DAYS", "60"))
+# The QR code on each PDF opens this frontend's challan page
+CHALLAN_VERIFY_URL = os.getenv("CHALLAN_VERIFY_URL", "http://localhost:5173")
+
 # ── Batch processing ────────────────────────────────────────────────────────
 BATCH_MIN_IMAGES = 1
 BATCH_MAX_IMAGES = 100

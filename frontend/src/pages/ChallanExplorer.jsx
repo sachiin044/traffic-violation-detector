@@ -132,7 +132,7 @@ export default function ChallanExplorer() {
                       <div className="is-muted">{formatTime(c.created_at || c.timestamp)}</div>
                     </td>
                     <td><Plate plate={c.plate_number} size="sm" /></td>
-                    <td><ViolationTags types={[c.violation_type]} /></td>
+                    <td><ViolationTags types={c.offences?.length ? c.offences.map((o) => o.type) : [c.violation_type]} /></td>
                     <td>{vehicleName(c.vehicle_type)}</td>
                     <td className="is-num">{pctExact(c.confidence)}</td>
                     <td className="is-num">{inr(c.fine_amount)}</td>

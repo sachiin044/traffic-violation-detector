@@ -12,6 +12,7 @@ import {
 } from '../../lib/violations';
 import { errorMessage, formatPlate, pct, pctExact, plural } from '../../lib/format';
 import { toFindings } from '../../lib/findings';
+import useRto from '../../lib/useRto';
 
 /* ── Page header ─────────────────────────────────────────────────────── */
 
@@ -57,10 +58,28 @@ export function Plate({ plate, size = 'lg' }) {
   );
 }
 
+// "Registered in Jhansi, Uttar Pradesh (RTO UP 93)" from the plate's district code
+export function RegisteredAt({ plate }) {
+  const rto = useRto(plate);
+  if (!plate || rto === undefined) return null;
+  const code = (plate || '').replace(/[^A-Z0-9]/gi, '').toUpperCase().match(/^([A-Z]{2})(\d{1,2})/);
+  if (!rto) {
+    return code ? (
+      <p className="vd-plate-note">No RTO found for code {code[1]} {code[2]}.</p>
+    ) : null;
+  }
+  return (
+    <p className="vd-plate-note">
+      Registered in <strong style={{ color: 'var(--vd-ink)' }}>{rto.place}</strong> (RTO {rto.display_code}).
+    </p>
+  );
+}
+
 export function PlateBlock({ plate, confidence }) {
   return (
     <>
       <Plate plate={plate} />
+      {plate && <RegisteredAt plate={plate} />}
       <p className="vd-plate-note">
         {plate
           ? `Read with ${pct(confidence)} confidence. Check it against the photo before issuing.`
