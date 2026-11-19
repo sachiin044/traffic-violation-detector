@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: traffic-violation-detector
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: MONGODB_URI
+        sync: false          # Set manually in Render dashboard — never commit secrets
+      - key: OPENAI_API_KEY
+        sync: false          # Optional: enables GPT Vision plate reader
+      - key: CHALLAN_AUTHORITY
+        value: Traffic Enforcement Unit
+      - key: CHALLAN_CITY
+        value: Bhubaneswar
+      - key: CHALLAN_PAYMENT_DAYS
+        value: "60"
+      - key: CHALLAN_VERIFY_URL
+        sync: false          # Set to your Vercel frontend URL after deploying frontend
+      - key: VEHICLE_MODEL
+        value: ensemble
+      - key: LOG_LEVEL
+        value: INFO
+    disk:
+      name: tvd-outputs
+      mountPath: /app/inference_outputs
+      sizeGB: 1

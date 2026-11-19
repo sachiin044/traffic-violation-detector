@@ -17,8 +17,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
-# Expose the port Hugging Face Spaces uses
-EXPOSE 7860
+# Render injects $PORT at runtime; HF Spaces uses 7860.
+# Default to 8000 for local runs.
+EXPOSE 8000
 
-# Command to run the FastAPI server on port 7860
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
+# Use shell form so $PORT is expanded at runtime
+CMD uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}

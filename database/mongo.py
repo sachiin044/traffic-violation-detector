@@ -4,13 +4,11 @@ This completely replaces the MongoDB Atlas connection for local robustness.
 It perfectly mimics the previous MongoDB interface so the rest of the app doesn't break.
 """
 
-import os
 import json
-import sqlite3
 import logging
-import uuid
-from typing import List, Dict, Any, Optional
-from datetime import datetime
+import os
+import sqlite3
+from typing import Any, Dict, List, Optional  # noqa: UP035
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +124,7 @@ class MongoDB:
             try:
                 d.update(json.loads(d['config_json']))
                 del d['config_json']
-            except:
+            except:  # noqa: S110
                 pass
         return d
 
